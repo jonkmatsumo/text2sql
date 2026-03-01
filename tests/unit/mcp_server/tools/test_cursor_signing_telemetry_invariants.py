@@ -24,6 +24,14 @@ from mcp_server.tools.execute_sql_query import handler
 pytestmark = pytest.mark.pagination
 
 _TEST_SECRET = "test-pagination-secret"
+_BUDGET_SNAPSHOT = {
+    "max_total_rows": 1000,
+    "max_total_bytes": 1_000_000,
+    "max_total_duration_ms": 60_000,
+    "consumed_rows": 0,
+    "consumed_bytes": 0,
+    "consumed_duration_ms": 0,
+}
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -101,6 +109,7 @@ async def test_signing_secret_configured_present_on_cursor_error():
         "stable-fp",
         secret="different-secret",
         now_epoch_seconds=99999999999,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
     with (
@@ -222,7 +231,12 @@ async def test_keyset_decode_fails_closed_without_secret(monkeypatch):
     monkeypatch.delenv("PAGINATION_CURSOR_ALLOW_INSECURE_DEV_SECRET", raising=False)
 
     cursor = encode_keyset_cursor(
-        [1], ["id|asc|nulls_last"], "fp", secret="some-old-secret", now_epoch_seconds=1000
+        [1],
+        ["id|asc|nulls_last"],
+        "fp",
+        secret="some-old-secret",
+        now_epoch_seconds=1000,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
     with (
@@ -257,7 +271,12 @@ async def test_offset_decode_fails_closed_without_secret(monkeypatch):
     monkeypatch.delenv("PAGINATION_CURSOR_ALLOW_INSECURE_DEV_SECRET", raising=False)
 
     token = encode_offset_pagination_token(
-        offset=0, limit=10, fingerprint="fp", secret="some-old-secret", now_epoch_seconds=1000
+        offset=0,
+        limit=10,
+        fingerprint="fp",
+        secret="some-old-secret",
+        now_epoch_seconds=1000,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
     caps = SimpleNamespace(
@@ -382,6 +401,7 @@ async def test_signature_valid_telemetry_on_keyset_decode_success():
         "stable-fp",
         secret=_TEST_SECRET,
         now_epoch_seconds=99999999999,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
     with (
@@ -426,6 +446,7 @@ async def test_signature_valid_false_on_keyset_signature_mismatch():
         "stable-fp",
         secret="different-secret",
         now_epoch_seconds=99999999999,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
     with (

@@ -10,6 +10,12 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 import sqlglot
 from sqlglot import exp
 
+from dal.execution_budget import (
+    PAGINATION_BUDGET_SNAPSHOT_INVALID,
+    ExecutionBudget,
+    ExecutionBudgetSnapshotError,
+    budget_snapshot_fingerprint,
+)
 from dal.pagination_cursor import (
     PAGINATION_CURSOR_SIGNATURE_INVALID,
     bounded_cursor_age_seconds,
@@ -228,6 +234,7 @@ def encode_keyset_cursor(
     max_age_s: int | None = None,
     now_epoch_seconds: int | None = None,
     query_fp: str | None = None,
+    budget_snapshot: Dict[str, Any] | None = None,
 ) -> str:
     """Encode keyset values and keys into an opaque base64 cursor."""
     payload: Dict[str, Any] = {
@@ -247,6 +254,10 @@ def encode_keyset_cursor(
     normalized_context = _normalize_cursor_context(cursor_context)
     if normalized_context:
         payload["c"] = normalized_context
+    if budget_snapshot is not None:
+        normalized_budget_snapshot = ExecutionBudget.from_snapshot(budget_snapshot).to_snapshot()
+        payload["budget_snapshot"] = normalized_budget_snapshot
+        payload["budget_fp"] = budget_snapshot_fingerprint(normalized_budget_snapshot)
     if secret:
         payload["s"] = _calculate_signature(payload, secret)
 
@@ -367,6 +378,22 @@ def decode_keyset_cursor(
                 if isinstance(decode_metadata, dict):
                     decode_metadata["validation_outcome"] = "QUERY_MISMATCH"
                 raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_QUERY_MISMATCH}.")
+        raw_budget_snapshot = payload.get("budget_snapshot")
+        raw_budget_fp = payload.get("budget_fp")
+        if raw_budget_snapshot is not None or raw_budget_fp is not None:
+            try:
+                normalized_budget_snapshot = ExecutionBudget.from_snapshot(
+                    raw_budget_snapshot
+                ).to_snapshot()
+                expected_budget_fp = budget_snapshot_fingerprint(normalized_budget_snapshot)
+            except ExecutionBudgetSnapshotError as exc:
+                raise ValueError(f"Invalid cursor: {PAGINATION_BUDGET_SNAPSHOT_INVALID}.") from exc
+            if not isinstance(raw_budget_fp, str) or raw_budget_fp != expected_budget_fp:
+                raise ValueError(f"Invalid cursor: {PAGINATION_BUDGET_SNAPSHOT_INVALID}.")
+            if isinstance(decode_metadata, dict):
+                decode_metadata["budget_snapshot"] = normalized_budget_snapshot
+        elif isinstance(decode_metadata, dict):
+            decode_metadata["budget_snapshot"] = None
         if payload.get("f") != expected_fingerprint:
             raise ValueError("Invalid cursor: fingerprint mismatch.")
         if expected_keys is not None:

@@ -10,6 +10,14 @@ import pytest
 from mcp_server.tools.execute_sql_query import handler
 
 _TEST_SECRET = "test-pagination-secret"
+_BUDGET_SNAPSHOT = {
+    "max_total_rows": 1000,
+    "max_total_bytes": 1_000_000,
+    "max_total_duration_ms": 60_000,
+    "consumed_rows": 0,
+    "consumed_bytes": 0,
+    "consumed_duration_ms": 0,
+}
 
 pytestmark = pytest.mark.pagination
 
@@ -779,6 +787,7 @@ async def test_execute_sql_query_keyset_cursor_invalid_fingerprint():
             "old-fingerprint",
             query_fp="query-fp",
             secret=_TEST_SECRET,
+            budget_snapshot=_BUDGET_SNAPSHOT,
         )
 
         sql = "SELECT id FROM users ORDER BY id ASC"
@@ -838,6 +847,7 @@ async def test_execute_sql_query_keyset_cursor_expired_reason_code_stable():
             issued_at=0,
             max_age_s=1,
             secret=_TEST_SECRET,
+            budget_snapshot=_BUDGET_SNAPSHOT,
         )
 
         payload = await handler(
@@ -897,6 +907,7 @@ async def test_execute_sql_query_keyset_cursor_clock_skew_reason_code_stable():
             issued_at=4_000_000_000,
             max_age_s=3600,
             secret=_TEST_SECRET,
+            budget_snapshot=_BUDGET_SNAPSHOT,
         )
 
         payload = await handler(
@@ -960,6 +971,7 @@ async def test_execute_sql_query_keyset_cursor_query_fp_mismatch_reason_code_sta
             "stable-fingerprint",
             query_fp="different-query-fp",
             secret=_TEST_SECRET,
+            budget_snapshot=_BUDGET_SNAPSHOT,
         )
 
         payload = await handler(
@@ -978,6 +990,160 @@ async def test_execute_sql_query_keyset_cursor_query_fp_mismatch_reason_code_sta
         == "PAGINATION_CURSOR_QUERY_MISMATCH"
     )
     assert result["metadata"]["pagination.reject_reason_code"] == "PAGINATION_CURSOR_QUERY_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_budget_snapshot_tamper_is_rejected():
+    """Budget snapshot tampering must be rejected even when cursor signature is recomputed."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self, rows):
+                self._rows = list(rows)
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return list(self._rows)
+
+        class _ConnCtx:
+            def __init__(self, conn):
+                self._conn = conn
+
+            async def __aenter__(self):
+                return self._conn
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        mock_get_conn.side_effect = [
+            _ConnCtx(_Conn([{"id": 1}, {"id": 2}, {"id": 3}])),
+            _ConnCtx(_Conn([{"id": 3}])),
+        ]
+
+        page_one = json.loads(
+            await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        )
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+        budget_snapshot = dict(payload.get("budget_snapshot") or {})
+        budget_snapshot["consumed_rows"] = int(budget_snapshot.get("consumed_rows", 0)) + 1
+        payload["budget_snapshot"] = budget_snapshot
+        payload.pop("s", None)
+        signature_data = json.dumps(payload, sort_keys=True)
+        payload["s"] = hmac.new(
+            _TEST_SECRET.encode("utf-8"), signature_data.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        tampered_cursor = (
+            base64.urlsafe_b64encode(json.dumps(payload, sort_keys=True).encode("utf-8"))
+            .decode("ascii")
+            .rstrip("=")
+        )
+
+        page_two = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=tampered_cursor,
+                page_size=2,
+            )
+        )
+
+    assert page_two["error"]["category"] == "invalid_request"
+    assert page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_BUDGET_SNAPSHOT_INVALID"
+    assert (
+        page_two["metadata"]["pagination.keyset.rejection_reason_code"]
+        == "PAGINATION_BUDGET_SNAPSHOT_INVALID"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_budget_snapshot_valid_continuation():
+    """Valid budget snapshots should allow continuation within accumulated request totals."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self, rows):
+                self._rows = list(rows)
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return list(self._rows)
+
+        class _ConnCtx:
+            def __init__(self, conn):
+                self._conn = conn
+
+            async def __aenter__(self):
+                return self._conn
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        mock_get_conn.side_effect = [
+            _ConnCtx(_Conn([{"id": 1}, {"id": 2}, {"id": 3}])),
+            _ConnCtx(_Conn([{"id": 3}])),
+        ]
+
+        page_one = json.loads(
+            await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        )
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+        padded = cursor + "=" * (-len(cursor) % 4)
+        cursor_payload = json.loads(
+            base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+        )
+        assert isinstance(cursor_payload.get("budget_snapshot"), dict)
+        assert isinstance(cursor_payload.get("budget_fp"), str)
+
+        page_two = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor,
+                page_size=2,
+            )
+        )
+
+    assert "error" not in page_two
+    assert page_two["rows"] == [{"id": 3}]
 
 
 @pytest.mark.asyncio
@@ -1117,6 +1283,7 @@ async def test_execute_sql_query_keyset_cursor_rejects_order_mismatch():
             "stable-fingerprint",
             query_fp="query-fp",
             secret=_TEST_SECRET,
+            budget_snapshot=_BUDGET_SNAPSHOT,
         )
         payload = await handler(
             "SELECT id FROM users ORDER BY id DESC",
@@ -3122,6 +3289,7 @@ async def test_execute_sql_query_keyset_rewrite_applied():
             "test-fingerprint",
             query_fp="query-fp",
             secret=_TEST_SECRET,
+            budget_snapshot=_BUDGET_SNAPSHOT,
         )
 
         await handler(
@@ -3461,6 +3629,19 @@ async def test_execute_sql_query_keyset_observability_parity_with_metadata():
             attrs["pagination.keyset.cursor_emitted"]
             == metadata["pagination.keyset.cursor_emitted"]
         )
+        assert (
+            attrs["pagination.budget.rows_remaining_bucket"]
+            == metadata["pagination.budget.rows_remaining_bucket"]
+        )
+        assert (
+            attrs["pagination.budget.bytes_remaining_bucket"]
+            == metadata["pagination.budget.bytes_remaining_bucket"]
+        )
+        assert attrs["pagination.budget.exhausted"] == metadata["pagination.budget.exhausted"]
+        assert metadata["pagination.budget.exhausted"] is False
+        assert metadata.get("pagination.budget.reason_code") is None
+        assert "pagination.budget.rows_remaining" not in attrs
+        assert "pagination.budget.bytes_remaining" not in attrs
 
 
 @pytest.mark.asyncio
@@ -4093,3 +4274,329 @@ async def test_execute_sql_query_keyset_budget_metadata_non_negative(monkeypatch
         assert metadata["pagination.keyset.byte_budget"] >= 0
         assert metadata["pagination.keyset.adaptive_page_size"] >= 1
         assert metadata["pagination.keyset.effective_page_size"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_rejects_when_global_row_budget_exceeded(monkeypatch):
+    """Second page should fail closed when cumulative rows exceed request budget."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "100")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "500000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.calls = 0
+
+            async def fetch(self, _query, *_args):
+                self.calls += 1
+                if self.calls == 1:
+                    return [{"id": i} for i in range(81)]
+                return [{"id": 1000 + i} for i in range(31)]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        page_one = json.loads(
+            await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=80)
+        )
+        assert "error" not in page_one
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+        mock_span.reset_mock()
+
+        page_two = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor,
+                page_size=30,
+            )
+        )
+
+    assert page_two["error"]["category"] == "invalid_request"
+    assert (
+        page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
+    )
+    metadata = page_two["metadata"]
+    assert metadata["pagination.budget.exhausted"] is True
+    assert metadata["pagination.budget.reason_code"] == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
+    assert metadata["pagination.budget.rows_remaining_bucket"] in {
+        "0",
+        "1_10",
+        "11_100",
+        "101_500",
+        "501_plus",
+    }
+    assert metadata["pagination.budget.bytes_remaining_bucket"] in {
+        "0",
+        "1_1k",
+        "1k_16k",
+        "16k_256k",
+        "256k_plus",
+    }
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+    assert (
+        attrs["pagination.budget.rows_remaining_bucket"]
+        == metadata["pagination.budget.rows_remaining_bucket"]
+    )
+    assert (
+        attrs["pagination.budget.bytes_remaining_bucket"]
+        == metadata["pagination.budget.bytes_remaining_bucket"]
+    )
+    assert attrs["pagination.budget.exhausted"] is True
+    assert attrs["pagination.budget.reason_code"] == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
+    assert "pagination.budget.rows_remaining" not in attrs
+    assert "pagination.budget.bytes_remaining" not in attrs
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_boundary_continuation_rejected_after_exact_budget(
+    monkeypatch,
+):
+    """Exact row-budget consumption should allow the page, then reject further continuation."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "100")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "500000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.calls = 0
+
+            async def fetch(self, _query, *_args):
+                self.calls += 1
+                if self.calls == 1:
+                    return [{"id": i} for i in range(61)]
+                if self.calls == 2:
+                    return [{"id": 1000 + i} for i in range(41)]
+                return [{"id": 2000 + i} for i in range(2)]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        page_one = json.loads(
+            await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=60)
+        )
+        assert "error" not in page_one
+        cursor_one = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor_one
+
+        page_two = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor_one,
+                page_size=40,
+            )
+        )
+        assert "error" not in page_two
+        assert page_two["metadata"]["pagination.budget.exhausted"] is True
+        cursor_two = page_two["metadata"]["next_keyset_cursor"]
+        assert cursor_two
+
+        page_three = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor_two,
+                page_size=1,
+            )
+        )
+
+    assert page_three["error"]["category"] == "invalid_request"
+    assert (
+        page_three["error"]["details_safe"]["reason_code"]
+        == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
+    )
+    assert mock_conn.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_rejects_when_global_byte_budget_exceeded(monkeypatch):
+    """Second page should fail closed when cumulative bytes exceed request budget."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id, blob FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "1000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "300")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.calls = 0
+
+            async def fetch(self, _query, *_args):
+                self.calls += 1
+                return [
+                    {"id": self.calls * 10 + 1, "blob": "x" * 128},
+                    {"id": self.calls * 10 + 2, "blob": "y" * 128},
+                ]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        page_one = json.loads(
+            await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=1)
+        )
+        assert "error" not in page_one
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+
+        page_two = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor,
+                page_size=1,
+            )
+        )
+
+    assert page_two["error"]["category"] == "invalid_request"
+    assert (
+        page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_rejects_when_global_time_budget_exceeded(monkeypatch):
+    """Second page should fail closed when cumulative duration exceeds request budget."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "1000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "500000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+
+    async def _run_without_timeout(operation, timeout_seconds, cancel=None, **_kwargs):
+        _ = (timeout_seconds, cancel)
+        return await operation()
+
+    monotonic_values = iter([0.0, 0.06, 1.0, 1.07, 1.08])
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch(
+            "mcp_server.tools.execute_sql_query.run_with_timeout",
+            side_effect=_run_without_timeout,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.time.monotonic",
+            side_effect=lambda: next(monotonic_values),
+        ),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.calls = 0
+
+            async def fetch(self, _query, *_args):
+                self.calls += 1
+                return [{"id": self.calls * 10 + 1}, {"id": self.calls * 10 + 2}]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        page_one = json.loads(
+            await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=1)
+        )
+        assert "error" not in page_one
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+
+        page_two = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor,
+                page_size=1,
+            )
+        )
+
+    assert page_two["error"]["category"] == "invalid_request"
+    assert (
+        page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_GLOBAL_TIME_BUDGET_EXCEEDED"
+    )

@@ -20,6 +20,14 @@ from dal.offset_pagination import (
 from mcp_server.tools.execute_sql_query import handler
 
 _TEST_SECRET = "test-pagination-secret"
+_BUDGET_SNAPSHOT = {
+    "max_total_rows": 1000,
+    "max_total_bytes": 1_000_000,
+    "max_total_duration_ms": 60_000,
+    "consumed_rows": 0,
+    "consumed_bytes": 0,
+    "consumed_duration_ms": 0,
+}
 
 
 def test_build_query_fingerprint_changes_with_order_signature():
@@ -491,7 +499,11 @@ async def test_execute_sql_query_offset_pagination_offset_cap_enforced(monkeypat
         max_execution_ms=limits.max_execution_ms,
     )
     token = encode_offset_pagination_token(
-        offset=999, limit=2, fingerprint=fingerprint, secret=_TEST_SECRET
+        offset=999,
+        limit=2,
+        fingerprint=fingerprint,
+        secret=_TEST_SECRET,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
     with (
@@ -558,6 +570,7 @@ async def test_execute_sql_query_offset_pagination_rejects_expired_cursor_stable
         issued_at=0,
         max_age_s=1,
         secret=_TEST_SECRET,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
     with (
@@ -627,6 +640,7 @@ async def test_execute_sql_query_offset_pagination_query_fp_mismatch_in_strict_m
         issued_at=int(time.time()),
         query_fp="query-fp-a",
         secret=_TEST_SECRET,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
     monkeypatch.setenv("PAGINATION_CURSOR_BIND_QUERY_FINGERPRINT", "true")
 
@@ -661,6 +675,91 @@ async def test_execute_sql_query_offset_pagination_query_fp_mismatch_in_strict_m
     assert result["error"]["error_code"] == "VALIDATION_ERROR"
     assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_QUERY_MISMATCH"
     assert result["metadata"]["pagination.reject_reason_code"] == "PAGINATION_CURSOR_QUERY_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_budget_snapshot_tamper_is_rejected():
+    """Offset token budget tampering should fail closed with stable reason code."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql="SELECT 1 AS id",
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=2,
+        fingerprint=fingerprint,
+        issued_at=int(time.time()),
+        secret=_TEST_SECRET,
+        budget_snapshot=_BUDGET_SNAPSHOT,
+    )
+
+    padded = token + "=" * (-len(token) % 4)
+    wrapper = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    wrapper["p"]["budget_snapshot"]["consumed_rows"] = 1
+    inner_bytes = json.dumps(wrapper["p"], separators=(",", ":"), sort_keys=True).encode("utf-8")
+    wrapper["s"] = hmac.new(
+        _TEST_SECRET.encode("utf-8"), inner_bytes, digestmod=hashlib.sha256
+    ).hexdigest()
+    tampered_token = (
+        base64.urlsafe_b64encode(
+            json.dumps(wrapper, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        )
+        .decode("ascii")
+        .rstrip("=")
+    )
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT 1 AS id",
+            tenant_id=1,
+            page_size=2,
+            page_token=tampered_token,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_BUDGET_SNAPSHOT_INVALID"
+    assert (
+        result["metadata"]["pagination.reject_reason_code"] == "PAGINATION_BUDGET_SNAPSHOT_INVALID"
+    )
 
 
 @pytest.mark.asyncio
@@ -779,6 +878,7 @@ async def test_execute_sql_query_offset_cursor_telemetry_parity_deterministic_cl
         issued_at=1_000,
         max_age_s=600,
         secret=_TEST_SECRET,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
     with (

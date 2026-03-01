@@ -376,6 +376,36 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.cursor.issued_at_present",
         serialization_alias="pagination.cursor.issued_at_present",
     )
+    pagination_budget_rows_remaining_bucket: Optional[
+        Literal["0", "1_10", "11_100", "101_500", "501_plus"]
+    ] = Field(
+        None,
+        description="Bucketed remaining global row budget across pagination continuation requests",
+        validation_alias="pagination.budget.rows_remaining_bucket",
+        serialization_alias="pagination.budget.rows_remaining_bucket",
+    )
+    pagination_budget_bytes_remaining_bucket: Optional[
+        Literal["0", "1_1k", "1k_16k", "16k_256k", "256k_plus"]
+    ] = Field(
+        None,
+        description="Bucketed remaining global byte budget across pagination continuation requests",
+        validation_alias="pagination.budget.bytes_remaining_bucket",
+        serialization_alias="pagination.budget.bytes_remaining_bucket",
+    )
+    pagination_budget_exhausted: Optional[bool] = Field(
+        None,
+        description="True when request-scoped global execution budget is exhausted",
+        validation_alias="pagination.budget.exhausted",
+        serialization_alias="pagination.budget.exhausted",
+    )
+    pagination_budget_reason_code: Optional[str] = Field(
+        None,
+        description=(
+            "Bounded reason code when global pagination execution budget rejects continuation"
+        ),
+        validation_alias="pagination.budget.reason_code",
+        serialization_alias="pagination.budget.reason_code",
+    )
 
     @model_validator(mode="before")
     @classmethod
