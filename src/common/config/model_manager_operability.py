@@ -75,6 +75,13 @@ def _bounded_ratio(value: Any) -> float | None:
     return numeric
 
 
+def _bounded_resolution_mode(value: Any) -> str:
+    normalized = _bounded_text(value, max_length=16, default=None)
+    if normalized and normalized.lower() in {"alias", "stage", "latest", "none"}:
+        return normalized.lower()
+    return "none"
+
+
 def get_ml_health_summary(
     *,
     model_manager_snapshot: Mapping[str, Any] | None = None,
@@ -89,6 +96,15 @@ def get_ml_health_summary(
     drift = dict(drift_snapshot or {})
     feature_coverage = dict(feature_coverage_snapshot or {})
     config = dict(strict_config or {})
+    drift_error_code = (
+        _bounded_text(drift.get("error_code"), max_length=64)
+        or _bounded_text(drift.get("last_error_code"), max_length=64)
+        or _bounded_text(model.get("drift_fallback_reason"), max_length=64)
+    )
+    drift_resolution_mode = _bounded_resolution_mode(
+        drift.get("resolution_mode") or drift.get("reference_resolution_mode")
+    )
+    drift_error_message = _bounded_text(drift.get("error_message"), max_length=200)
 
     return {
         "model": {
@@ -110,13 +126,24 @@ def get_ml_health_summary(
             "last_run_ts": _bounded_timestamp(benchmark.get("last_run_ts")),
         },
         "drift": {
-            "reference_resolution_mode": _bounded_text(
-                drift.get("reference_resolution_mode"),
-                max_length=16,
+            "reference_resolution_mode": drift_resolution_mode,
+            "last_error_code": drift_error_code,
+            "error_code": drift_error_code,
+            "error_message": drift_error_message if drift_error_code else None,
+            "resolution_mode": drift_resolution_mode,
+            "reference_model_version": _bounded_text(
+                drift.get("reference_model_version"),
+                max_length=128,
             ),
-            "last_error_code": (
-                _bounded_text(drift.get("last_error_code"), max_length=64)
-                or _bounded_text(model.get("drift_fallback_reason"), max_length=64)
+            "bucketing_requested": (
+                bool(drift.get("bucketing_requested"))
+                if isinstance(drift.get("bucketing_requested"), bool)
+                else None
+            ),
+            "bucketing_used": (
+                bool(drift.get("bucketing_used"))
+                if isinstance(drift.get("bucketing_used"), bool)
+                else None
             ),
         },
         "feature_coverage": {
