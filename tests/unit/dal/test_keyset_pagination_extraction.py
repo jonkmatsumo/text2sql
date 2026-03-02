@@ -1,10 +1,11 @@
 import pytest
 
 from dal.keyset_pagination import (
+    KEYSET_ORDER_BY_AMBIGUOUS_COLUMN,
+    KEYSET_ORDER_BY_MISSING_TIEBREAKER,
+    KEYSET_ORDER_BY_REQUIRED,
+    KEYSET_ORDER_BY_UNSAFE_EXPRESSION,
     KEYSET_ORDER_COLUMN_NOT_FOUND,
-    KEYSET_REQUIRES_STABLE_TIEBREAKER,
-    KEYSET_TIEBREAKER_NOT_UNIQUE,
-    KEYSET_TIEBREAKER_NULLABLE,
     StaticSchemaInfoProvider,
     extract_keyset_order_keys,
     validate_stable_tiebreaker,
@@ -36,14 +37,21 @@ def test_extract_keyset_order_keys_no_order():
 def test_extract_keyset_order_keys_nondeterministic_random():
     """Test rejection of RANDOM() in ORDER BY."""
     sql = "SELECT id FROM users ORDER BY RANDOM()"
-    with pytest.raises(ValueError, match="Nondeterministic ORDER BY expression"):
+    with pytest.raises(ValueError, match=KEYSET_ORDER_BY_UNSAFE_EXPRESSION):
         extract_keyset_order_keys(sql)
 
 
 def test_extract_keyset_order_keys_nondeterministic_uuid():
     """Test rejection of UUID generation in ORDER BY."""
     sql = "SELECT id FROM users ORDER BY gen_random_uuid()"
-    with pytest.raises(ValueError, match="Nondeterministic ORDER BY expression"):
+    with pytest.raises(ValueError, match=KEYSET_ORDER_BY_UNSAFE_EXPRESSION):
+        extract_keyset_order_keys(sql)
+
+
+def test_extract_keyset_order_keys_nondeterministic_now():
+    """Test rejection of NOW()/CURRENT_TIMESTAMP in ORDER BY."""
+    sql = "SELECT id FROM users ORDER BY now()"
+    with pytest.raises(ValueError, match=KEYSET_ORDER_BY_UNSAFE_EXPRESSION):
         extract_keyset_order_keys(sql)
 
 
@@ -82,8 +90,14 @@ def test_extract_keyset_order_keys_invalid_sql():
 def test_validate_stable_tiebreaker_rejects_created_at_only():
     """Single non-id tie-breakers should fail closed without metadata."""
     keys = extract_keyset_order_keys("SELECT id FROM users ORDER BY created_at DESC")
-    with pytest.raises(ValueError, match=KEYSET_REQUIRES_STABLE_TIEBREAKER):
+    with pytest.raises(ValueError, match=KEYSET_ORDER_BY_MISSING_TIEBREAKER):
         validate_stable_tiebreaker(keys, table_names=["users"])
+
+
+def test_validate_stable_tiebreaker_rejects_missing_order_by():
+    """ORDER BY is mandatory for keyset mode."""
+    with pytest.raises(ValueError, match=KEYSET_ORDER_BY_REQUIRED):
+        validate_stable_tiebreaker([], table_names=["users"])
 
 
 def test_validate_stable_tiebreaker_allows_created_at_with_id():
@@ -146,7 +160,7 @@ def test_validate_stable_tiebreaker_rejects_nullable_tiebreaker_without_explicit
             }
         }
     )
-    with pytest.raises(ValueError, match=KEYSET_TIEBREAKER_NULLABLE):
+    with pytest.raises(ValueError, match=KEYSET_ORDER_BY_MISSING_TIEBREAKER):
         validate_stable_tiebreaker(keys, table_names=["users"], schema_info=schema_info)
 
 
@@ -193,14 +207,14 @@ def test_validate_stable_tiebreaker_rejects_non_unique_suffix_when_schema_knows_
         },
         unique_keys_by_table={"users": [["id"]]},
     )
-    with pytest.raises(ValueError, match=KEYSET_TIEBREAKER_NOT_UNIQUE):
+    with pytest.raises(ValueError, match=KEYSET_ORDER_BY_MISSING_TIEBREAKER):
         validate_stable_tiebreaker(keys, table_names=["users"], schema_info=schema_info)
 
 
 def test_validate_stable_tiebreaker_rejects_nullable_metadata_tiebreaker():
     """Metadata should reject nullable final tie-breaker columns."""
     keys = extract_keyset_order_keys("SELECT id FROM users ORDER BY created_at DESC, id ASC")
-    with pytest.raises(ValueError, match=KEYSET_REQUIRES_STABLE_TIEBREAKER):
+    with pytest.raises(ValueError, match=KEYSET_ORDER_BY_MISSING_TIEBREAKER):
         validate_stable_tiebreaker(
             keys,
             table_names=["users"],
@@ -212,3 +226,13 @@ def test_validate_stable_tiebreaker_rejects_nullable_metadata_tiebreaker():
                 }
             },
         )
+
+
+def test_validate_stable_tiebreaker_rejects_ambiguous_unqualified_columns_in_join():
+    """Unqualified ORDER BY columns are rejected when multiple sources are present."""
+    keys = extract_keyset_order_keys(
+        "SELECT u.id, o.id AS order_id FROM users u JOIN orders o ON o.user_id = u.id "
+        "ORDER BY id ASC"
+    )
+    with pytest.raises(ValueError, match=KEYSET_ORDER_BY_AMBIGUOUS_COLUMN):
+        validate_stable_tiebreaker(keys, table_names=["users", "orders"])

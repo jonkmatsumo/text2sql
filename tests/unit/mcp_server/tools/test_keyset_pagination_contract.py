@@ -43,10 +43,11 @@ async def test_execute_sql_query_keyset_order_by_required():
 
         result = json.loads(payload)
         assert result["error"]["category"] == "invalid_request"
-        assert (
-            result["error"]["details_safe"]["reason_code"]
-            == "execution_pagination_keyset_order_by_required"
-        )
+        assert result["error"]["details_safe"]["reason_code"] == "KEYSET_ORDER_BY_REQUIRED"
+        metadata = result["metadata"]
+        assert metadata["pagination.keyset.order_contract"] == "error"
+        assert metadata["pagination.keyset.order_reason_code"] == "KEYSET_ORDER_BY_REQUIRED"
+        assert metadata["pagination.keyset.tiebreaker_present"] is False
 
 
 @pytest.mark.asyncio
@@ -209,7 +210,11 @@ async def test_execute_sql_query_keyset_rejects_unstable_tiebreaker_created_at_o
 
     result = json.loads(payload)
     assert result["error"]["category"] == "invalid_request"
-    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_REQUIRES_STABLE_TIEBREAKER"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_ORDER_BY_MISSING_TIEBREAKER"
+    metadata = result["metadata"]
+    assert metadata["pagination.keyset.order_contract"] == "error"
+    assert metadata["pagination.keyset.order_reason_code"] == "KEYSET_ORDER_BY_MISSING_TIEBREAKER"
+    assert metadata["pagination.keyset.tiebreaker_present"] is False
 
 
 @pytest.mark.asyncio
@@ -250,6 +255,9 @@ async def test_execute_sql_query_keyset_allows_created_at_with_id_tiebreaker():
 
     result = json.loads(payload)
     assert "error" not in result
+    assert result["metadata"]["pagination.keyset.order_contract"] == "ok"
+    assert result["metadata"].get("pagination.keyset.order_reason_code") is None
+    assert result["metadata"]["pagination.keyset.tiebreaker_present"] is True
 
 
 @pytest.mark.asyncio
@@ -279,9 +287,77 @@ async def test_execute_sql_query_keyset_rejects_random_tiebreaker():
 
     result = json.loads(payload)
     assert result["error"]["category"] == "invalid_request"
-    assert (
-        result["error"]["details_safe"]["reason_code"] == "execution_pagination_keyset_invalid_sql"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_ORDER_BY_UNSAFE_EXPRESSION"
+    metadata = result["metadata"]
+    assert metadata["pagination.keyset.order_contract"] == "error"
+    assert metadata["pagination.keyset.order_reason_code"] == "KEYSET_ORDER_BY_UNSAFE_EXPRESSION"
+    assert metadata["pagination.keyset.tiebreaker_present"] is False
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_unsafe_ordering_fails_before_execution():
+    """Unsafe keyset ORDER BY should reject before opening a database connection."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
     )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY random()",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_ORDER_BY_UNSAFE_EXPRESSION"
+    mock_get_conn.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_rejects_ambiguous_join_ordering():
+    """Unqualified ORDER BY columns in joins should fail closed."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT u.id, o.id AS order_id FROM users u "
+            "JOIN orders o ON o.user_id = u.id ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_ORDER_BY_AMBIGUOUS_COLUMN"
+    metadata = result["metadata"]
+    assert metadata["pagination.keyset.order_contract"] == "error"
+    assert metadata["pagination.keyset.order_reason_code"] == "KEYSET_ORDER_BY_AMBIGUOUS_COLUMN"
+    assert metadata["pagination.keyset.tiebreaker_present"] is False
 
 
 @pytest.mark.asyncio
@@ -326,7 +402,7 @@ async def test_execute_sql_query_keyset_rejects_nullable_tiebreaker_with_metadat
 
     result = json.loads(payload)
     assert result["error"]["category"] == "invalid_request"
-    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_TIEBREAKER_NULLABLE"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_ORDER_BY_MISSING_TIEBREAKER"
 
 
 @pytest.mark.asyncio
@@ -525,7 +601,7 @@ async def test_execute_sql_query_keyset_rejects_non_unique_tiebreaker_with_schem
 
     result = json.loads(payload)
     assert result["error"]["category"] == "invalid_request"
-    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_TIEBREAKER_NOT_UNIQUE"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_ORDER_BY_MISSING_TIEBREAKER"
 
 
 @pytest.mark.asyncio
@@ -705,6 +781,14 @@ async def test_execute_sql_query_keyset_schema_rejection_observability_parity():
     assert reason_code == "KEYSET_ORDER_COLUMN_NOT_FOUND"
     assert metadata["pagination.keyset.rejection_reason_code"] == reason_code
     assert attrs["pagination.keyset.rejection_reason_code"] == reason_code
+    assert metadata["pagination.keyset.order_contract"] == "error"
+    assert metadata["pagination.keyset.order_reason_code"] == reason_code
+    assert metadata["pagination.keyset.tiebreaker_present"] is False
+    assert attrs["pagination.keyset.order_contract"] == metadata["pagination.keyset.order_contract"]
+    assert (
+        attrs["pagination.keyset.order_reason_code"]
+        == metadata["pagination.keyset.order_reason_code"]
+    )
     assert attrs["pagination.keyset.schema_used"] == metadata["pagination.keyset.schema_used"]
     assert attrs["pagination.keyset.schema_strict"] == metadata["pagination.keyset.schema_strict"]
     assert attrs["pagination.keyset.schema_stale"] == metadata["pagination.keyset.schema_stale"]
@@ -1294,7 +1378,11 @@ async def test_execute_sql_query_keyset_cursor_rejects_order_mismatch():
 
     result = json.loads(payload)
     assert result["error"]["category"] == "invalid_request"
-    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_ORDER_MISMATCH"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_CURSOR_ORDERBY_MISMATCH"
+    metadata = result["metadata"]
+    assert metadata["pagination.keyset.order_contract"] == "error"
+    assert metadata["pagination.keyset.order_reason_code"] == "KEYSET_CURSOR_ORDERBY_MISMATCH"
+    assert metadata["pagination.keyset.tiebreaker_present"] is True
 
 
 @pytest.mark.asyncio
@@ -3629,6 +3717,16 @@ async def test_execute_sql_query_keyset_observability_parity_with_metadata():
             attrs["pagination.keyset.cursor_emitted"]
             == metadata["pagination.keyset.cursor_emitted"]
         )
+        assert (
+            attrs["pagination.keyset.order_contract"]
+            == metadata["pagination.keyset.order_contract"]
+        )
+        assert (
+            attrs["pagination.keyset.tiebreaker_present"]
+            == metadata["pagination.keyset.tiebreaker_present"]
+        )
+        assert metadata["pagination.keyset.order_contract"] == "ok"
+        assert metadata.get("pagination.keyset.order_reason_code") is None
         assert (
             attrs["pagination.budget.rows_remaining_bucket"]
             == metadata["pagination.budget.rows_remaining_bucket"]

@@ -31,7 +31,7 @@ Failure reason codes (bounded set)
   - ``PAGINATION_CURSOR_CLOCK_SKEW``       — issued_at too far in the future
   - ``PAGINATION_CURSOR_ISSUED_AT_INVALID``— missing or non-integer issued_at
   - ``PAGINATION_CURSOR_QUERY_MISMATCH``   — query fingerprint mismatch
-  - ``KEYSET_ORDER_MISMATCH``              — ORDER BY key drift
+  - ``KEYSET_CURSOR_ORDERBY_MISMATCH``     — ORDER BY key drift
   - ``KEYSET_SNAPSHOT_MISMATCH``           — cursor context drift (snapshot)
   - ``KEYSET_TOPOLOGY_MISMATCH``           — cursor context drift (topology)
   - ``KEYSET_SHARD_MISMATCH``              — cursor context drift (shard)

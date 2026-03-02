@@ -24,8 +24,14 @@ from dal.pagination_cursor import (
     normalize_strict_int,
 )
 
-KEYSET_REQUIRES_STABLE_TIEBREAKER = "KEYSET_REQUIRES_STABLE_TIEBREAKER"
-KEYSET_ORDER_MISMATCH = "KEYSET_ORDER_MISMATCH"
+KEYSET_ORDER_BY_REQUIRED = "KEYSET_ORDER_BY_REQUIRED"
+KEYSET_ORDER_BY_UNSAFE_EXPRESSION = "KEYSET_ORDER_BY_UNSAFE_EXPRESSION"
+KEYSET_ORDER_BY_AMBIGUOUS_COLUMN = "KEYSET_ORDER_BY_AMBIGUOUS_COLUMN"
+KEYSET_ORDER_BY_MISSING_TIEBREAKER = "KEYSET_ORDER_BY_MISSING_TIEBREAKER"
+KEYSET_CURSOR_ORDERBY_MISMATCH = "KEYSET_CURSOR_ORDERBY_MISMATCH"
+# Backwards-compatible aliases used by existing imports/tests.
+KEYSET_REQUIRES_STABLE_TIEBREAKER = KEYSET_ORDER_BY_MISSING_TIEBREAKER
+KEYSET_ORDER_MISMATCH = KEYSET_CURSOR_ORDERBY_MISMATCH
 KEYSET_ORDER_COLUMN_NOT_FOUND = "KEYSET_ORDER_COLUMN_NOT_FOUND"
 KEYSET_TIEBREAKER_NULLABLE = "KEYSET_TIEBREAKER_NULLABLE"
 KEYSET_TIEBREAKER_NOT_UNIQUE = "KEYSET_TIEBREAKER_NOT_UNIQUE"
@@ -399,8 +405,10 @@ def decode_keyset_cursor(
         if expected_keys is not None:
             raw_keys = payload.get("k", [])
             payload_keys = raw_keys if isinstance(raw_keys, list) else []
-            if payload_keys != expected_keys:
-                raise ValueError(f"Invalid cursor: {KEYSET_ORDER_MISMATCH}.")
+            normalized_payload_keys = _normalize_order_signature_entries(payload_keys)
+            normalized_expected_keys = _normalize_order_signature_entries(expected_keys)
+            if normalized_payload_keys != normalized_expected_keys:
+                raise ValueError(f"Invalid cursor: {KEYSET_CURSOR_ORDERBY_MISMATCH}.")
 
         return payload.get("v", [])
     except Exception as e:
@@ -485,7 +493,7 @@ def extract_keyset_order_keys(sql: str, provider: str = "postgres") -> List[Keys
         # Reject nondeterministic expressions
         if _is_nondeterministic(this):
             raise ValueError(
-                f"Nondeterministic ORDER BY expression not allowed: {this.sql(dialect)}"
+                f"{KEYSET_ORDER_BY_UNSAFE_EXPRESSION}: ORDER BY expressions must be deterministic."
             )
 
         descending = o.args.get("desc") is True
@@ -564,8 +572,16 @@ def validate_stable_tiebreaker(
 ) -> None:
     """Fail closed unless ORDER BY terminates in a stable deterministic tie-breaker."""
     if not order_keys:
+        raise ValueError(f"{KEYSET_ORDER_BY_REQUIRED}: ORDER BY is required for keyset pagination.")
+    for order_key in order_keys:
+        if _is_nondeterministic(order_key.expression):
+            raise ValueError(
+                f"{KEYSET_ORDER_BY_UNSAFE_EXPRESSION}: ORDER BY expressions must be deterministic."
+            )
+    if _requires_qualified_order_columns(table_names) and _has_ambiguous_order_columns(order_keys):
         raise ValueError(
-            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: ORDER BY must include a stable tie-breaker."
+            f"{KEYSET_ORDER_BY_AMBIGUOUS_COLUMN}: "
+            "ORDER BY columns must be explicitly qualified in multi-source queries."
         )
 
     if schema_info is not None:
@@ -580,8 +596,8 @@ def validate_stable_tiebreaker(
         is_nullable = schema_info.is_nullable(tie_table, tie_column)
         if is_nullable is True and not tie_key.explicit_nulls_order:
             raise ValueError(
-                f"{KEYSET_TIEBREAKER_NULLABLE}: "
-                "Final ORDER BY key must be NOT NULL unless NULLS FIRST/LAST is explicit."
+                f"{KEYSET_ORDER_BY_MISSING_TIEBREAKER}: "
+                "Final ORDER BY key must be a stable non-null unique tie-breaker."
             )
 
         saw_uniqueness_info = False
@@ -595,30 +611,30 @@ def validate_stable_tiebreaker(
 
         if saw_uniqueness_info:
             raise ValueError(
-                f"{KEYSET_TIEBREAKER_NOT_UNIQUE}: "
+                f"{KEYSET_ORDER_BY_MISSING_TIEBREAKER}: "
                 "ORDER BY suffix must include a unique key for stable keyset pagination."
             )
         if _is_legacy_allowed_tiebreaker(tie_column, table_names=table_names, allowlist=allowlist):
             return
         raise ValueError(
-            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: "
-            "Final ORDER BY key must be id/<table>_id or allowlisted."
+            f"{KEYSET_ORDER_BY_MISSING_TIEBREAKER}: "
+            "Final ORDER BY key must be explicitly stable and unique."
         )
 
     tie_key = order_keys[-1]
     if _is_nondeterministic(tie_key.expression):
         raise ValueError(
-            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: ORDER BY tie-breaker must be deterministic."
+            f"{KEYSET_ORDER_BY_UNSAFE_EXPRESSION}: ORDER BY expressions must be deterministic."
         )
     if not isinstance(tie_key.expression, exp.Column):
         raise ValueError(
-            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Final ORDER BY key must be a plain column."
+            f"{KEYSET_ORDER_BY_MISSING_TIEBREAKER}: Final ORDER BY key must be a plain column."
         )
 
     column_name = _normalize_identifier(tie_key.expression.name)
     if not column_name:
         raise ValueError(
-            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Final ORDER BY column name is invalid."
+            f"{KEYSET_ORDER_BY_MISSING_TIEBREAKER}: Final ORDER BY column name is invalid."
         )
 
     metadata = column_metadata or {}
@@ -630,7 +646,7 @@ def validate_stable_tiebreaker(
         column_info = metadata.get(metadata_key) or metadata.get(column_name)
         if not column_info:
             raise ValueError(
-                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Unable to verify tie-breaker metadata."
+                f"{KEYSET_ORDER_BY_MISSING_TIEBREAKER}: Unable to verify tie-breaker metadata."
             )
 
         is_nullable = _is_truthy_metadata_flag(
@@ -638,7 +654,8 @@ def validate_stable_tiebreaker(
         ) or _is_truthy_metadata_flag(column_info.get("is_nullable"))
         if is_nullable:
             raise ValueError(
-                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Final ORDER BY key must be NOT NULL."
+                f"{KEYSET_ORDER_BY_MISSING_TIEBREAKER}: "
+                "Final ORDER BY key must be a stable non-null unique tie-breaker."
             )
 
         is_unique = any(
@@ -647,15 +664,15 @@ def validate_stable_tiebreaker(
         )
         if not is_unique:
             raise ValueError(
-                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: "
+                f"{KEYSET_ORDER_BY_MISSING_TIEBREAKER}: "
                 "Final ORDER BY key must be unique or primary key."
             )
         return
 
     if not _is_legacy_allowed_tiebreaker(column_name, table_names=table_names, allowlist=allowlist):
         raise ValueError(
-            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: "
-            "Final ORDER BY key must be id/<table>_id or allowlisted."
+            f"{KEYSET_ORDER_BY_MISSING_TIEBREAKER}: "
+            "Final ORDER BY key must be explicitly stable and unique."
         )
 
 
@@ -663,7 +680,7 @@ def build_keyset_order_signature(order_keys: List[KeysetOrderKey]) -> List[str]:
     """Build a deterministic structural signature for ORDER BY parity checks."""
     signature: List[str] = []
     for key in order_keys:
-        expression_sql = _normalize_sql_fragment(key.expression.sql())
+        expression_sql = _canonical_order_expression(key.expression)
         direction = "desc" if key.descending else "asc"
         nulls = "nulls_first" if key.nulls_first else "nulls_last"
         signature.append(f"{expression_sql}|{direction}|{nulls}")
@@ -815,13 +832,34 @@ def _is_nondeterministic(expression: exp.Expression) -> bool:
         "RANDOM",
         "UUID",
         "GEN_RANDOM_UUID",
+        "UUID_GENERATE_V4",
+        "CLOCK_TIMESTAMP",
+        "STATEMENT_TIMESTAMP",
+        "TRANSACTION_TIMESTAMP",
+        "TIMEOFDAY",
         "NOW",
         "CURRENT_TIMESTAMP",
+        "CURRENTTIMESTAMP",
+        "CURRENT_DATE",
+        "CURRENTDATE",
+        "CURRENT_TIME",
+        "CURRENTTIME",
+        "LOCALTIME",
+        "LOCALTIMESTAMP",
     }
-    for func in expression.find_all(exp.Func, exp.Anonymous):
-        name = func.this if isinstance(func, exp.Anonymous) else func.key
-        if name and name.upper() in nondeterministic_funcs:
-            return True
+    for node in expression.walk():
+        if not isinstance(node, exp.Expression):
+            continue
+        candidates: list[str] = []
+        key_name = getattr(node, "key", None)
+        if isinstance(key_name, str) and key_name:
+            candidates.append(key_name)
+        if isinstance(node, exp.Anonymous) and isinstance(node.this, str):
+            candidates.append(node.this)
+        for candidate in candidates:
+            normalized = candidate.strip().replace(" ", "_").upper()
+            if normalized in nondeterministic_funcs:
+                return True
     return False
 
 
@@ -939,16 +977,100 @@ def _is_legacy_allowed_tiebreaker(
     table_names: Optional[List[str]],
     allowlist: Optional[set[str]],
 ) -> bool:
-    allowed_columns = {"id"}
-    for table_name in table_names or []:
-        normalized_table = _normalize_table_name(table_name)
-        if normalized_table:
-            allowed_columns.add(f"{normalized_table}_id")
+    allowed_columns: set[str] = set()
+    if len(_normalized_base_tables(table_names)) == 1:
+        allowed_columns.add("id")
     for name in allowlist or set():
         normalized_name = _normalize_identifier(name)
         if normalized_name:
             allowed_columns.add(normalized_name)
     return column_name in allowed_columns
+
+
+def _requires_qualified_order_columns(table_names: Optional[List[str]]) -> bool:
+    return len(_normalized_base_tables(table_names)) > 1
+
+
+def _normalized_base_tables(table_names: Optional[List[str]]) -> set[str]:
+    normalized_tables = set()
+    for table_name in table_names or []:
+        normalized_table = _normalize_identifier(table_name)
+        if normalized_table:
+            normalized_tables.add(normalized_table)
+    return normalized_tables
+
+
+def _has_ambiguous_order_columns(order_keys: List[KeysetOrderKey]) -> bool:
+    for key in order_keys:
+        for column in key.expression.find_all(exp.Column):
+            if not _normalize_identifier(column.table):
+                return True
+    return False
+
+
+def _canonical_order_expression(expression: exp.Expression) -> str:
+    if isinstance(expression, exp.Column):
+        normalized_table = _normalize_identifier(expression.table)
+        normalized_column = _normalize_identifier(expression.name)
+        if normalized_table and normalized_column:
+            return f"{normalized_table}.{normalized_column}"
+        if normalized_column:
+            return normalized_column
+    return _normalize_sql_fragment(expression.sql())
+
+
+def _normalize_order_signature_entries(raw_entries: List[Any]) -> List[str]:
+    normalized_entries: List[str] = []
+    for raw_entry in raw_entries:
+        normalized_entry = _normalize_order_signature_entry(raw_entry)
+        if not normalized_entry:
+            return []
+        normalized_entries.append(normalized_entry)
+    return normalized_entries
+
+
+def _normalize_order_signature_entry(raw_entry: Any) -> str:
+    if not isinstance(raw_entry, str):
+        return ""
+    stripped_entry = raw_entry.strip()
+    if not stripped_entry:
+        return ""
+    expression_part, direction_part, nulls_part = _split_signature_components(stripped_entry)
+    if expression_part is None or direction_part is None or nulls_part is None:
+        return ""
+    normalized_expression = _normalize_signature_expression(expression_part)
+    if not normalized_expression:
+        return ""
+    normalized_direction = direction_part.strip().lower()
+    if normalized_direction not in {"asc", "desc"}:
+        return ""
+    normalized_nulls = nulls_part.strip().lower()
+    if normalized_nulls not in {"nulls_first", "nulls_last"}:
+        return ""
+    return f"{normalized_expression}|{normalized_direction}|{normalized_nulls}"
+
+
+def _split_signature_components(raw_signature: str) -> tuple[str | None, str | None, str | None]:
+    parts = raw_signature.rsplit("|", 2)
+    if len(parts) != 3:
+        return None, None, None
+    return parts[0], parts[1], parts[2]
+
+
+def _normalize_signature_expression(raw_expression: str) -> str:
+    fallback_expression = _normalize_sql_fragment(raw_expression)
+    if not fallback_expression:
+        return ""
+    try:
+        parsed = sqlglot.parse_one(f"SELECT 1 ORDER BY {raw_expression}", read="postgres")
+    except Exception:
+        return fallback_expression
+    if not isinstance(parsed, exp.Select):
+        return fallback_expression
+    order = parsed.args.get("order")
+    if not order or not order.expressions:
+        return fallback_expression
+    return _canonical_order_expression(order.expressions[0].this)
 
 
 def _is_truthy_metadata_flag(value: Any) -> bool:
