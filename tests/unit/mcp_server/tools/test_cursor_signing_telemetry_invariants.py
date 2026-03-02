@@ -177,7 +177,10 @@ async def test_error_response_does_not_leak_raw_cursor():
 async def test_reason_codes_are_bounded():
     """Reason codes in error responses must be from the known set."""
     known_reason_codes = {
-        "execution_pagination_keyset_order_by_required",
+        "KEYSET_ORDER_BY_REQUIRED",
+        "KEYSET_ORDER_BY_UNSAFE_EXPRESSION",
+        "KEYSET_ORDER_BY_AMBIGUOUS_COLUMN",
+        "KEYSET_ORDER_BY_MISSING_TIEBREAKER",
         "execution_pagination_keyset_cursor_invalid",
         "execution_pagination_keyset_invalid_sql",
         "execution_pagination_page_token_invalid",
@@ -185,11 +188,10 @@ async def test_reason_codes_are_bounded():
         "execution_pagination_page_size_invalid",
         "execution_pagination_page_size_exceeds_max_rows",
         "PAGINATION_MODE_TOKEN_MISMATCH",
-        "KEYSET_ORDER_MISMATCH",
+        "KEYSET_CURSOR_ORDERBY_MISMATCH",
         "KEYSET_SNAPSHOT_MISMATCH",
         "KEYSET_TOPOLOGY_MISMATCH",
         "KEYSET_REPLICA_LAG_UNSAFE",
-        "KEYSET_REQUIRES_STABLE_TIEBREAKER",
         "KEYSET_NULLABLE_TIEBREAKER_UNSAFE",
         "PAGINATION_FEDERATED_ORDERING_UNSAFE",
         "PAGINATION_FEDERATED_UNSUPPORTED",

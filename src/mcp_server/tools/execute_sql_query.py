@@ -126,6 +126,11 @@ _PARTIAL_REASON_NORMALIZATION = {
 }
 _ADAPTIVE_ROW_SIZE_FALLBACK_BYTES = 1024
 _KEYSET_REJECTION_REASON_ALLOWLIST = {
+    "KEYSET_ORDER_BY_REQUIRED",
+    "KEYSET_ORDER_BY_UNSAFE_EXPRESSION",
+    "KEYSET_ORDER_BY_AMBIGUOUS_COLUMN",
+    "KEYSET_ORDER_BY_MISSING_TIEBREAKER",
+    "KEYSET_CURSOR_ORDERBY_MISMATCH",
     "KEYSET_ORDER_COLUMN_NOT_FOUND",
     "KEYSET_TIEBREAKER_NULLABLE",
     "KEYSET_TIEBREAKER_NOT_UNIQUE",
@@ -150,6 +155,32 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED,
     PAGINATION_GLOBAL_TIME_BUDGET_EXCEEDED,
     PAGINATION_BUDGET_SNAPSHOT_INVALID,
+}
+_KEYSET_ORDER_CONTRACT_REASON_ALLOWLIST = {
+    "KEYSET_ORDER_BY_REQUIRED",
+    "KEYSET_ORDER_BY_UNSAFE_EXPRESSION",
+    "KEYSET_ORDER_BY_AMBIGUOUS_COLUMN",
+    "KEYSET_ORDER_BY_MISSING_TIEBREAKER",
+    "KEYSET_CURSOR_ORDERBY_MISMATCH",
+    "KEYSET_ORDER_COLUMN_NOT_FOUND",
+}
+_KEYSET_ORDER_CONTRACT_ERROR_MESSAGE_BY_REASON = {
+    "KEYSET_ORDER_BY_REQUIRED": "Keyset pagination requires an ORDER BY clause.",
+    "KEYSET_ORDER_BY_UNSAFE_EXPRESSION": (
+        "Keyset pagination ORDER BY must use deterministic expressions."
+    ),
+    "KEYSET_ORDER_BY_AMBIGUOUS_COLUMN": (
+        "Keyset pagination ORDER BY columns must be qualified for multi-source queries."
+    ),
+    "KEYSET_ORDER_BY_MISSING_TIEBREAKER": (
+        "Keyset pagination ORDER BY must end with a stable unique tie-breaker."
+    ),
+    "KEYSET_CURSOR_ORDERBY_MISMATCH": (
+        "Keyset cursor does not match the query ORDER BY structure."
+    ),
+    "KEYSET_ORDER_COLUMN_NOT_FOUND": (
+        "Keyset pagination ORDER BY columns must resolve to known base columns."
+    ),
 }
 _PAGINATION_BUDGET_REASON_ALLOWLIST = {
     PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED,
@@ -484,6 +515,55 @@ def _bounded_keyset_rejection_reason_code(raw_reason_code: Any) -> str | None:
 
 def _bounded_pagination_reject_reason_code(raw_reason_code: Any) -> str | None:
     return _bounded_keyset_rejection_reason_code(raw_reason_code)
+
+
+def _extract_reason_code_prefix(raw_message: Any) -> str | None:
+    if not isinstance(raw_message, str):
+        return None
+    message = raw_message.strip()
+    if not message:
+        return None
+    prefix = message.split(":", 1)[0].strip()
+    return prefix or None
+
+
+def _extract_keyset_order_contract_reason_code(raw_message: Any) -> str | None:
+    reason_code = _extract_reason_code_prefix(raw_message)
+    if reason_code in _KEYSET_ORDER_CONTRACT_REASON_ALLOWLIST:
+        return reason_code
+    return None
+
+
+def _keyset_order_contract_error_message(reason_code: str) -> str:
+    return _KEYSET_ORDER_CONTRACT_ERROR_MESSAGE_BY_REASON.get(
+        reason_code,
+        "Keyset pagination ordering contract validation failed.",
+    )
+
+
+def _set_keyset_order_contract_error(
+    metadata: dict[str, Any] | None,
+    reason_code: str | None,
+    *,
+    tiebreaker_present: bool,
+) -> None:
+    if not isinstance(metadata, dict):
+        return
+    bounded_reason_code = _bounded_keyset_rejection_reason_code(reason_code)
+    metadata["pagination.keyset.order_contract"] = "error"
+    metadata["pagination.keyset.order_reason_code"] = bounded_reason_code
+    metadata["pagination.keyset.tiebreaker_present"] = bool(tiebreaker_present)
+    metadata["pagination.keyset.rejection_reason_code"] = bounded_reason_code
+    if bounded_reason_code is not None:
+        metadata["pagination.reject_reason_code"] = bounded_reason_code
+
+
+def _set_keyset_order_contract_ok(metadata: dict[str, Any] | None) -> None:
+    if not isinstance(metadata, dict):
+        return
+    metadata["pagination.keyset.order_contract"] = "ok"
+    metadata["pagination.keyset.order_reason_code"] = None
+    metadata["pagination.keyset.tiebreaker_present"] = True
 
 
 def _bounded_pagination_budget_reason_code(raw_reason_code: Any) -> str | None:
@@ -947,6 +1027,18 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
     schema_used = bool(schema_metadata.get("pagination.keyset.schema_used"))
     schema_strict = bool(schema_metadata.get("pagination.keyset.schema_strict"))
     schema_stale = bool(schema_metadata.get("pagination.keyset.schema_stale"))
+    order_contract_raw = schema_metadata.get("pagination.keyset.order_contract")
+    order_contract = (
+        order_contract_raw.strip().lower()
+        if isinstance(order_contract_raw, str) and order_contract_raw.strip()
+        else "error"
+    )
+    if order_contract not in {"ok", "error"}:
+        order_contract = "error"
+    order_reason_code = _bounded_keyset_rejection_reason_code(
+        schema_metadata.get("pagination.keyset.order_reason_code")
+    )
+    tiebreaker_present = bool(schema_metadata.get("pagination.keyset.tiebreaker_present"))
     snapshot_strict = bool(schema_metadata.get("pagination.keyset.snapshot_strict"))
     snapshot_id_present = bool(schema_metadata.get("pagination.keyset.snapshot_id_present"))
     snapshot_mismatch = bool(schema_metadata.get("pagination.keyset.snapshot_mismatch"))
@@ -1035,6 +1127,10 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
         span.set_attribute("pagination.keyset.schema_used", schema_used)
         span.set_attribute("pagination.keyset.schema_strict", schema_strict)
         span.set_attribute("pagination.keyset.schema_stale", schema_stale)
+        span.set_attribute("pagination.keyset.order_contract", order_contract)
+        span.set_attribute("pagination.keyset.tiebreaker_present", tiebreaker_present)
+        if order_reason_code is not None:
+            span.set_attribute("pagination.keyset.order_reason_code", order_reason_code)
         span.set_attribute("pagination.keyset.snapshot_strict", snapshot_strict)
         span.set_attribute("pagination.keyset.snapshot_id_present", snapshot_id_present)
         span.set_attribute("pagination.keyset.snapshot_mismatch", snapshot_mismatch)
@@ -2095,6 +2191,9 @@ async def handler(
     if pagination_mode == "keyset":
         tenant_enforcement_metadata["pagination.keyset.partial_page"] = False
         tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = False
+        tenant_enforcement_metadata["pagination.keyset.order_contract"] = "error"
+        tenant_enforcement_metadata["pagination.keyset.order_reason_code"] = None
+        tenant_enforcement_metadata["pagination.keyset.tiebreaker_present"] = False
         tenant_enforcement_metadata["pagination.backend_set_sig_present"] = False
         tenant_enforcement_metadata["pagination.backend_set_mismatch"] = False
         tenant_enforcement_metadata["pagination.keyset.byte_budget"] = max(
@@ -2278,10 +2377,7 @@ async def handler(
         )
 
     if pagination_mode == "keyset":
-        supports_keyset_fallback = bool(getattr(caps, "supports_pagination", False)) or (
-            bool(getattr(caps, "supports_offset_pagination_wrapper", False))
-            and bool(getattr(caps, "supports_query_wrapping_subselect", False))
-        )
+        supports_keyset_fallback = bool(getattr(caps, "supports_pagination", False))
         supports_keyset = bool(getattr(caps, "supports_keyset", supports_keyset_fallback))
         supports_keyset_with_containment_fallback = (
             supports_keyset
@@ -2323,12 +2419,9 @@ async def handler(
             )
 
         from dal.keyset_pagination import (
-            KEYSET_ORDER_COLUMN_NOT_FOUND,
-            KEYSET_REQUIRES_STABLE_TIEBREAKER,
+            KEYSET_ORDER_BY_MISSING_TIEBREAKER,
             KEYSET_SCHEMA_REQUIRED,
             KEYSET_SCHEMA_STALE,
-            KEYSET_TIEBREAKER_NOT_UNIQUE,
-            KEYSET_TIEBREAKER_NULLABLE,
             StaticSchemaInfoProvider,
             build_keyset_order_signature,
             extract_keyset_order_keys,
@@ -2340,25 +2433,27 @@ async def handler(
             keyset_order_keys = extract_keyset_order_keys(sql_query, provider=provider)
             keyset_table_names = extract_keyset_table_names(sql_query, provider=provider)
         except ValueError as e:
+            reason_code = _extract_keyset_order_contract_reason_code(str(e))
+            if reason_code is not None:
+                _set_keyset_order_contract_error(
+                    tenant_enforcement_metadata,
+                    reason_code,
+                    tiebreaker_present=False,
+                )
+                return _construct_error_response(
+                    execution_started_at,
+                    message=_keyset_order_contract_error_message(reason_code),
+                    category=ErrorCategory.INVALID_REQUEST,
+                    provider=provider,
+                    metadata={"reason_code": reason_code},
+                    envelope_metadata=tenant_enforcement_metadata,
+                )
             return _construct_error_response(
                 execution_started_at,
-                message=str(e),
+                message="Keyset pagination query is invalid.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
                 metadata={"reason_code": "execution_pagination_keyset_invalid_sql"},
-                envelope_metadata=tenant_enforcement_metadata,
-            )
-
-        if not keyset_order_keys:
-            return _construct_error_response(
-                execution_started_at,
-                message=(
-                    "Keyset pagination requires an ORDER BY clause with "
-                    "deterministic expressions."
-                ),
-                category=ErrorCategory.INVALID_REQUEST,
-                provider=provider,
-                metadata={"reason_code": "execution_pagination_keyset_order_by_required"},
                 envelope_metadata=tenant_enforcement_metadata,
             )
 
@@ -2426,31 +2521,24 @@ async def handler(
                 schema_info=keyset_schema_info,
             )
         except ValueError as e:
-            error_message = str(e)
             reason_code = (
-                KEYSET_REQUIRES_STABLE_TIEBREAKER
-                if KEYSET_REQUIRES_STABLE_TIEBREAKER in error_message
-                else "execution_pagination_keyset_invalid_sql"
+                _extract_keyset_order_contract_reason_code(str(e))
+                or KEYSET_ORDER_BY_MISSING_TIEBREAKER
             )
-            for schema_reason in (
-                KEYSET_ORDER_COLUMN_NOT_FOUND,
-                KEYSET_SCHEMA_REQUIRED,
-                KEYSET_SCHEMA_STALE,
-                KEYSET_TIEBREAKER_NULLABLE,
-                KEYSET_TIEBREAKER_NOT_UNIQUE,
-            ):
-                if schema_reason in error_message:
-                    reason_code = schema_reason
-                    break
-            tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = reason_code
+            _set_keyset_order_contract_error(
+                tenant_enforcement_metadata,
+                reason_code,
+                tiebreaker_present=False,
+            )
             return _construct_error_response(
                 execution_started_at,
-                message=error_message,
+                message=_keyset_order_contract_error_message(reason_code),
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
                 metadata={"reason_code": reason_code},
                 envelope_metadata=tenant_enforcement_metadata,
             )
+        _set_keyset_order_contract_ok(tenant_enforcement_metadata)
         keyset_order_signature = build_keyset_order_signature(keyset_order_keys)
 
         if page_size:
@@ -2975,7 +3063,7 @@ async def handler(
                 import sqlglot
 
                 from dal.keyset_pagination import (
-                    KEYSET_ORDER_MISMATCH,
+                    KEYSET_CURSOR_ORDERBY_MISMATCH,
                     KEYSET_PARTITION_SET_CHANGED,
                     KEYSET_SHARD_MISMATCH,
                     KEYSET_SNAPSHOT_MISMATCH,
@@ -3144,8 +3232,13 @@ async def handler(
                         )
                     except ValueError as e:
                         reason_code = "execution_pagination_keyset_cursor_invalid"
-                        if KEYSET_ORDER_MISMATCH in str(e):
-                            reason_code = KEYSET_ORDER_MISMATCH
+                        if KEYSET_CURSOR_ORDERBY_MISMATCH in str(e):
+                            reason_code = KEYSET_CURSOR_ORDERBY_MISMATCH
+                            _set_keyset_order_contract_error(
+                                tenant_enforcement_metadata,
+                                reason_code,
+                                tiebreaker_present=True,
+                            )
                         elif KEYSET_SNAPSHOT_MISMATCH in str(e):
                             reason_code = KEYSET_SNAPSHOT_MISMATCH
                             tenant_enforcement_metadata["pagination.keyset.snapshot_mismatch"] = (
@@ -3628,6 +3721,8 @@ async def handler(
             and keyset_page_truncated
             and not keyset_partial_page
             and not streaming_terminated_early
+            and tenant_enforcement_metadata.get("pagination.keyset.order_contract") == "ok"
+            and bool(tenant_enforcement_metadata.get("pagination.keyset.tiebreaker_present"))
             and result_rows
         ):
             from dal.keyset_pagination import encode_keyset_cursor, get_keyset_values
@@ -3780,6 +3875,15 @@ async def handler(
                 ),
                 "pagination.keyset.schema_stale": tenant_enforcement_metadata.get(
                     "pagination.keyset.schema_stale"
+                ),
+                "pagination.keyset.order_contract": tenant_enforcement_metadata.get(
+                    "pagination.keyset.order_contract"
+                ),
+                "pagination.keyset.order_reason_code": tenant_enforcement_metadata.get(
+                    "pagination.keyset.order_reason_code"
+                ),
+                "pagination.keyset.tiebreaker_present": tenant_enforcement_metadata.get(
+                    "pagination.keyset.tiebreaker_present"
                 ),
                 "pagination.keyset.snapshot_strict": tenant_enforcement_metadata.get(
                     "pagination.keyset.snapshot_strict"
