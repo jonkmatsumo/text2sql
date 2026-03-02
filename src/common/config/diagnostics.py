@@ -8,6 +8,7 @@ from common.config.env import get_env_bool, get_env_int, get_env_str
 from common.config.model_manager_operability import (
     ModelManagerHardeningFlags,
     build_model_manager_diagnostics_snapshot,
+    get_ml_health_summary,
 )
 
 
@@ -49,6 +50,7 @@ def build_operator_diagnostics(*, debug: bool = False) -> dict[str, Any]:
     )
 
     model_manager_flags = ModelManagerHardeningFlags.from_env()
+    model_manager_snapshot = build_model_manager_diagnostics_snapshot(flags=model_manager_flags)
     diagnostics = {
         "diagnostics_schema_version": 1,
         "active_database_provider": get_env_str("QUERY_TARGET_BACKEND", "postgres"),
@@ -85,7 +87,8 @@ def build_operator_diagnostics(*, debug: bool = False) -> dict[str, Any]:
             "model_manager_calibration_strict_mode": model_manager_flags.calibration_strict_mode,
             "model_manager_drift_strict_mode": model_manager_flags.drift_strict_mode,
         },
-        "model_manager": build_model_manager_diagnostics_snapshot(flags=model_manager_flags),
+        "model_manager": model_manager_snapshot,
+        "ml_health": get_ml_health_summary(model_manager_snapshot=model_manager_snapshot),
     }
     if debug:
         from agent.runtime_metrics import get_stage_latency_breakdown
