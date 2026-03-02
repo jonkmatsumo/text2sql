@@ -42,7 +42,16 @@ def test_ml_health_summary_shape_is_stable_and_bounded():
         "schema_mismatch_detected",
     }
     assert set(summary["benchmark"].keys()) == {"enabled", "last_status", "last_run_ts"}
-    assert set(summary["drift"].keys()) == {"reference_resolution_mode", "last_error_code"}
+    assert set(summary["drift"].keys()) == {
+        "reference_resolution_mode",
+        "last_error_code",
+        "error_code",
+        "error_message",
+        "resolution_mode",
+        "reference_model_version",
+        "bucketing_requested",
+        "bucketing_used",
+    }
     assert set(summary["feature_coverage"].keys()) == {"last_ratio", "below_threshold"}
     assert set(summary["config"].keys()) == {
         "strict_feature_schema",
@@ -62,6 +71,9 @@ def test_ml_health_summary_shape_is_stable_and_bounded():
     assert isinstance(summary["benchmark"]["enabled"], bool)
     assert summary["feature_coverage"]["last_ratio"] == 1.0
     assert summary["drift"]["last_error_code"] == "drift_fallback_disabled"
+    assert summary["drift"]["error_code"] == "drift_fallback_disabled"
+    assert summary["drift"]["error_message"] is None
+    assert summary["drift"]["resolution_mode"] == "latest"
 
 
 def test_operator_diagnostics_exposes_ml_health_shape():
