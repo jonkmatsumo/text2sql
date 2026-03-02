@@ -50,6 +50,13 @@ def build_operator_diagnostics(*, debug: bool = False) -> dict[str, Any]:
     )
 
     model_manager_flags = ModelManagerHardeningFlags.from_env()
+    ml_strict_config = {
+        "strict_feature_schema": model_manager_flags.strict_schema_mode,
+        "strict_tuning_resume_validation": model_manager_flags.strict_reload_mode,
+        "strict_split_strategy_validation": model_manager_flags.drift_strict_mode,
+        "strict_calibration_validation": model_manager_flags.calibration_strict_mode,
+        "strict_schema_mismatch_blocking": _safe_env_bool("AGENT_BLOCK_ON_SCHEMA_MISMATCH", False),
+    }
     model_manager_snapshot = build_model_manager_diagnostics_snapshot(flags=model_manager_flags)
     diagnostics = {
         "diagnostics_schema_version": 1,
@@ -88,7 +95,10 @@ def build_operator_diagnostics(*, debug: bool = False) -> dict[str, Any]:
             "model_manager_drift_strict_mode": model_manager_flags.drift_strict_mode,
         },
         "model_manager": model_manager_snapshot,
-        "ml_health": get_ml_health_summary(model_manager_snapshot=model_manager_snapshot),
+        "ml_health": get_ml_health_summary(
+            model_manager_snapshot=model_manager_snapshot,
+            strict_config=ml_strict_config,
+        ),
     }
     if debug:
         from agent.runtime_metrics import get_stage_latency_breakdown

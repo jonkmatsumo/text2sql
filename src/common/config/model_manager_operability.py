@@ -81,12 +81,14 @@ def get_ml_health_summary(
     benchmark_snapshot: Mapping[str, Any] | None = None,
     drift_snapshot: Mapping[str, Any] | None = None,
     feature_coverage_snapshot: Mapping[str, Any] | None = None,
+    strict_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a compact bounded ML health summary with stable keys."""
     model = dict(model_manager_snapshot or {})
     benchmark = dict(benchmark_snapshot or {})
     drift = dict(drift_snapshot or {})
     feature_coverage = dict(feature_coverage_snapshot or {})
+    config = dict(strict_config or {})
 
     return {
         "model": {
@@ -123,6 +125,21 @@ def get_ml_health_summary(
                 bool(feature_coverage["below_threshold"])
                 if isinstance(feature_coverage.get("below_threshold"), bool)
                 else None
+            ),
+        },
+        "config": {
+            "strict_feature_schema": bool(config.get("strict_feature_schema", False)),
+            "strict_tuning_resume_validation": bool(
+                config.get("strict_tuning_resume_validation", False)
+            ),
+            "strict_split_strategy_validation": bool(
+                config.get("strict_split_strategy_validation", False)
+            ),
+            "strict_calibration_validation": bool(
+                config.get("strict_calibration_validation", False)
+            ),
+            "strict_schema_mismatch_blocking": bool(
+                config.get("strict_schema_mismatch_blocking", False)
             ),
         },
     }
