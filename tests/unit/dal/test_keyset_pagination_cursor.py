@@ -1,7 +1,7 @@
 import pytest
 
 from dal.keyset_pagination import (
-    KEYSET_ORDER_MISMATCH,
+    KEYSET_CURSOR_ORDERBY_MISMATCH,
     KEYSET_PARTITION_SET_CHANGED,
     KEYSET_SHARD_MISMATCH,
     KEYSET_SNAPSHOT_MISMATCH,
@@ -70,7 +70,7 @@ def test_keyset_cursor_secret_validation():
 def test_keyset_cursor_order_signature_rejects_direction_change():
     """Changing ORDER BY direction between pages must be rejected."""
     cursor = encode_keyset_cursor([123], ["id|asc|nulls_last"], "f1")
-    with pytest.raises(ValueError, match=KEYSET_ORDER_MISMATCH):
+    with pytest.raises(ValueError, match=KEYSET_CURSOR_ORDERBY_MISMATCH):
         decode_keyset_cursor(
             cursor,
             expected_fingerprint="f1",
@@ -81,7 +81,7 @@ def test_keyset_cursor_order_signature_rejects_direction_change():
 def test_keyset_cursor_order_signature_rejects_added_or_removed_key():
     """Changing ORDER BY key count between pages must be rejected."""
     cursor = encode_keyset_cursor([123], ["created_at|desc|nulls_first"], "f1")
-    with pytest.raises(ValueError, match=KEYSET_ORDER_MISMATCH):
+    with pytest.raises(ValueError, match=KEYSET_CURSOR_ORDERBY_MISMATCH):
         decode_keyset_cursor(
             cursor,
             expected_fingerprint="f1",
@@ -96,7 +96,7 @@ def test_keyset_cursor_order_signature_rejects_reordered_keys():
         ["created_at|desc|nulls_first", "id|asc|nulls_last"],
         "f1",
     )
-    with pytest.raises(ValueError, match=KEYSET_ORDER_MISMATCH):
+    with pytest.raises(ValueError, match=KEYSET_CURSOR_ORDERBY_MISMATCH):
         decode_keyset_cursor(
             cursor,
             expected_fingerprint="f1",

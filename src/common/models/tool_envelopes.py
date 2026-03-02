@@ -195,6 +195,24 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.keyset.schema_stale",
         serialization_alias="pagination.keyset.schema_stale",
     )
+    pagination_keyset_order_contract: Optional[Literal["ok", "error"]] = Field(
+        None,
+        description="Status of keyset ORDER BY stability contract validation",
+        validation_alias="pagination.keyset.order_contract",
+        serialization_alias="pagination.keyset.order_contract",
+    )
+    pagination_keyset_order_reason_code: Optional[str] = Field(
+        None,
+        description="Bounded reason code when keyset ORDER BY contract fails",
+        validation_alias="pagination.keyset.order_reason_code",
+        serialization_alias="pagination.keyset.order_reason_code",
+    )
+    pagination_keyset_tiebreaker_present: Optional[bool] = Field(
+        None,
+        description="True when keyset ORDER BY includes a stable tie-breaker",
+        validation_alias="pagination.keyset.tiebreaker_present",
+        serialization_alias="pagination.keyset.tiebreaker_present",
+    )
     pagination_keyset_snapshot_strict: Optional[bool] = Field(
         None,
         description="True when strict snapshot requirements are enabled for keyset validation",

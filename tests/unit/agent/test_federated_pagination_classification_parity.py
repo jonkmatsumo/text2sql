@@ -210,6 +210,60 @@ async def test_federated_keyset_rejection_classification_parity_between_mcp_and_
 
 
 @pytest.mark.asyncio
+async def test_keyset_order_required_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for missing keyset ORDER BY."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="single_backend",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_pagination=True,
+    )
+    mcp_result = await _invoke_mcp_federated_keyset(caps, sql="SELECT id FROM users")
+    await _assert_agent_reason_parity(mcp_result, "KEYSET_ORDER_BY_REQUIRED")
+
+
+@pytest.mark.asyncio
+async def test_keyset_ambiguous_ordering_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for ambiguous multi-source ORDER BY."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="single_backend",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_pagination=True,
+    )
+    mcp_result = await _invoke_mcp_federated_keyset(
+        caps,
+        sql=(
+            "SELECT u.id, o.id AS order_id FROM users u "
+            "JOIN orders o ON o.user_id = u.id ORDER BY id ASC"
+        ),
+    )
+    await _assert_agent_reason_parity(mcp_result, "KEYSET_ORDER_BY_AMBIGUOUS_COLUMN")
+
+
+@pytest.mark.asyncio
+async def test_keyset_missing_tiebreaker_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for missing stable keyset tie-breakers."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="single_backend",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_pagination=True,
+    )
+    mcp_result = await _invoke_mcp_federated_keyset(
+        caps,
+        sql="SELECT id FROM users ORDER BY created_at DESC",
+    )
+    await _assert_agent_reason_parity(mcp_result, "KEYSET_ORDER_BY_MISSING_TIEBREAKER")
+
+
+@pytest.mark.asyncio
 async def test_backend_set_mismatch_classification_parity_between_mcp_and_agent():
     """Agent must preserve MCP backend-set drift rejection classification metadata."""
     caps = BackendCapabilities(
