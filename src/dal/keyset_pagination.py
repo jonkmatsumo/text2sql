@@ -17,6 +17,8 @@ from dal.execution_budget import (
     budget_snapshot_fingerprint,
 )
 from dal.pagination_cursor import (
+    PAGINATION_CURSOR_SCOPE_MISMATCH,
+    PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SIGNATURE_INVALID,
     bounded_cursor_age_seconds,
     cursor_now_epoch_seconds,
@@ -288,6 +290,7 @@ def decode_keyset_cursor(
     clock_skew_seconds: int = 300,
     now_epoch_seconds: int | None = None,
     expected_query_fp: str | None = None,
+    expected_scope_fp: str | None = None,
 ) -> List[Any]:
     """Decode and validate a keyset cursor."""
     try:
@@ -337,6 +340,8 @@ def decode_keyset_cursor(
             decode_metadata["expired"] = False
             decode_metadata["skew_detected"] = False
             decode_metadata["issued_at_present"] = issued_at is not None
+            decode_metadata["scope_bound"] = False
+            decode_metadata["scope_mismatch"] = False
         if issued_at is None:
             if require_issued_at:
                 if isinstance(decode_metadata, dict):
@@ -379,6 +384,20 @@ def decode_keyset_cursor(
                 raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_EXPIRED}.")
             if isinstance(decode_metadata, dict):
                 decode_metadata["validation_outcome"] = "OK"
+        expected_scope_fingerprint = normalize_cursor_scope_fingerprint(expected_scope_fp)
+        if expected_scope_fingerprint:
+            if isinstance(decode_metadata, dict):
+                decode_metadata["scope_bound"] = True
+            payload_scope_fingerprint = normalize_cursor_scope_fingerprint(payload.get("scope_fp"))
+            if not payload_scope_fingerprint:
+                if isinstance(decode_metadata, dict):
+                    decode_metadata["validation_outcome"] = "SCOPE_MISSING"
+                raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_SCOPE_MISSING}.")
+            if payload_scope_fingerprint != expected_scope_fingerprint:
+                if isinstance(decode_metadata, dict):
+                    decode_metadata["scope_mismatch"] = True
+                    decode_metadata["validation_outcome"] = "SCOPE_MISMATCH"
+                raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_SCOPE_MISMATCH}.")
         expected_query_fingerprint = (
             str(expected_query_fp).strip() if isinstance(expected_query_fp, str) else None
         )

@@ -55,6 +55,8 @@ from dal.offset_pagination import (
     encode_offset_pagination_token,
 )
 from dal.pagination_cursor import (
+    PAGINATION_CURSOR_SCOPE_MISMATCH,
+    PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
     CursorSigningSecrets,
@@ -152,6 +154,8 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "PAGINATION_CURSOR_ISSUED_AT_INVALID",
     "PAGINATION_CURSOR_CLOCK_SKEW",
     "PAGINATION_CURSOR_QUERY_MISMATCH",
+    PAGINATION_CURSOR_SCOPE_MISSING,
+    PAGINATION_CURSOR_SCOPE_MISMATCH,
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
     "PAGINATION_CURSOR_SIGNATURE_INVALID",
@@ -202,6 +206,8 @@ _CURSOR_VALIDATION_OUTCOME_ALLOWLIST = {
     "SIGNATURE_INVALID",
     "SECRET_MISSING",
     "SECRET_WEAK",
+    "SCOPE_MISSING",
+    "SCOPE_MISMATCH",
 }
 _CURSOR_AGE_BUCKET_ALLOWLIST = {
     "0_59",
@@ -226,6 +232,8 @@ _CURSOR_DECODE_REASON_CODE_ALLOWLIST = {
     "PAGINATION_CURSOR_ISSUED_AT_INVALID",
     "PAGINATION_CURSOR_CLOCK_SKEW",
     "PAGINATION_CURSOR_QUERY_MISMATCH",
+    PAGINATION_CURSOR_SCOPE_MISSING,
+    PAGINATION_CURSOR_SCOPE_MISMATCH,
     "PAGINATION_CURSOR_SIGNATURE_INVALID",
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
@@ -742,6 +750,8 @@ def _cursor_validation_outcome_from_reason_code(reason_code: Any) -> str | None:
         "PAGINATION_CURSOR_CLOCK_SKEW": "SKEW",
         "PAGINATION_CURSOR_ISSUED_AT_INVALID": "INVALID",
         "PAGINATION_CURSOR_QUERY_MISMATCH": "QUERY_MISMATCH",
+        "PAGINATION_CURSOR_SCOPE_MISSING": "SCOPE_MISSING",
+        "PAGINATION_CURSOR_SCOPE_MISMATCH": "SCOPE_MISMATCH",
         "PAGINATION_CURSOR_SIGNATURE_INVALID": "SIGNATURE_INVALID",
         "PAGINATION_CURSOR_SECRET_MISSING": "SECRET_MISSING",
         "PAGINATION_CURSOR_SECRET_WEAK": "SECRET_WEAK",
@@ -777,6 +787,10 @@ def _apply_cursor_decode_metadata(
         envelope_metadata["pagination.cursor.expired"] = bool(metadata.get("expired"))
     if "skew_detected" in metadata:
         envelope_metadata["pagination.cursor.skew_detected"] = bool(metadata.get("skew_detected"))
+    if "scope_bound" in metadata:
+        envelope_metadata["pagination.cursor.scope_bound"] = bool(metadata.get("scope_bound"))
+    if "scope_mismatch" in metadata:
+        envelope_metadata["pagination.cursor.scope_mismatch"] = bool(metadata.get("scope_mismatch"))
     validation_outcome = _normalize_cursor_validation_outcome(metadata.get("validation_outcome"))
     if validation_outcome is None:
         validation_outcome = _cursor_validation_outcome_from_reason_code(fallback_reason_code)
@@ -792,6 +806,12 @@ def _apply_cursor_decode_metadata(
         envelope_metadata["pagination.cursor.skew_detected"] = True
     if fallback_reason_code == "PAGINATION_CURSOR_ISSUED_AT_INVALID":
         envelope_metadata.setdefault("cursor_issued_at_present", False)
+    if fallback_reason_code == PAGINATION_CURSOR_SCOPE_MISSING:
+        envelope_metadata["pagination.cursor.scope_bound"] = True
+        envelope_metadata.setdefault("pagination.cursor.scope_mismatch", False)
+    if fallback_reason_code == PAGINATION_CURSOR_SCOPE_MISMATCH:
+        envelope_metadata["pagination.cursor.scope_bound"] = True
+        envelope_metadata["pagination.cursor.scope_mismatch"] = True
 
 
 def _normalize_keyset_context_value(value: Any) -> str | None:
@@ -3329,6 +3349,7 @@ async def handler(
                             expected_query_fp=(
                                 cursor_query_fingerprint if cursor_bind_query_fingerprint else None
                             ),
+                            expected_scope_fp=cursor_scope_fingerprint,
                         )
                     except ValueError as e:
                         reason_code = "execution_pagination_keyset_cursor_invalid"
@@ -3368,6 +3389,11 @@ async def handler(
                             reason_code = "PAGINATION_CURSOR_CLOCK_SKEW"
                         elif "PAGINATION_CURSOR_QUERY_MISMATCH" in str(e):
                             reason_code = "PAGINATION_CURSOR_QUERY_MISMATCH"
+                        elif PAGINATION_CURSOR_SCOPE_MISSING in str(e):
+                            reason_code = PAGINATION_CURSOR_SCOPE_MISSING
+                        elif PAGINATION_CURSOR_SCOPE_MISMATCH in str(e):
+                            reason_code = PAGINATION_CURSOR_SCOPE_MISMATCH
+                            tenant_enforcement_metadata["pagination.cursor.scope_mismatch"] = True
                         elif PAGINATION_BUDGET_SNAPSHOT_INVALID in str(e):
                             reason_code = PAGINATION_BUDGET_SNAPSHOT_INVALID
                         elif "PAGINATION_CURSOR_SIGNATURE_INVALID" in str(e):
@@ -3542,6 +3568,7 @@ async def handler(
                             expected_query_fp=(
                                 cursor_query_fingerprint if cursor_bind_query_fingerprint else None
                             ),
+                            expected_scope_fp=cursor_scope_fingerprint,
                         )
                         pagination_offset = token_payload.offset
                         pagination_limit = token_payload.limit

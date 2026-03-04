@@ -22,6 +22,7 @@ from mcp_server.tools.execute_sql_query import handler as mcp_execute_sql_query_
 pytestmark = pytest.mark.pagination
 
 _TEST_SECRET = "test-pagination-secret-for-unit-tests-2026"
+_TEST_SCOPE_FP = "abcdeffedcba0123"
 _BUDGET_SNAPSHOT = {
     "max_total_rows": 1000,
     "max_total_bytes": 1_000_000,
@@ -372,6 +373,7 @@ async def test_cursor_query_mismatch_classification_parity_between_mcp_and_agent
         ["id|asc|nulls_last"],
         "stable-fingerprint",
         query_fp="cursor-query-fp",
+        scope_fp=_TEST_SCOPE_FP,
         secret=_TEST_SECRET,
         budget_snapshot=_BUDGET_SNAPSHOT,
     )
@@ -383,6 +385,10 @@ async def test_cursor_query_mismatch_classification_parity_between_mcp_and_agent
         patch(
             "mcp_server.tools.execute_sql_query.build_cursor_query_fingerprint",
             return_value="expected-query-fp",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
         ),
     ):
         mcp_result = await _invoke_mcp_federated_keyset(

@@ -366,6 +366,8 @@ class ExecuteSQLQueryMetadata(BaseModel):
             "SIGNATURE_INVALID",
             "SECRET_MISSING",
             "SECRET_WEAK",
+            "SCOPE_MISSING",
+            "SCOPE_MISMATCH",
         ]
     ] = Field(
         None,

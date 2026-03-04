@@ -20,6 +20,7 @@ from dal.offset_pagination import (
 from mcp_server.tools.execute_sql_query import handler
 
 _TEST_SECRET = "test-pagination-secret-for-unit-tests-2026"
+_TEST_SCOPE_FP = "abcdeffedcba0123"
 _BUDGET_SNAPSHOT = {
     "max_total_rows": 1000,
     "max_total_bytes": 1_000_000,
@@ -460,10 +461,7 @@ async def test_execute_sql_query_offset_pagination_token_mismatch_rejected():
 
     second = json.loads(second_payload)
     assert second["error"]["category"] == "invalid_request"
-    assert (
-        second["error"]["details_safe"]["reason_code"]
-        == "execution_pagination_page_token_fingerprint_mismatch"
-    )
+    assert second["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_SCOPE_MISMATCH"
 
 
 @pytest.mark.asyncio
@@ -503,6 +501,7 @@ async def test_execute_sql_query_offset_pagination_offset_cap_enforced(monkeypat
         limit=2,
         fingerprint=fingerprint,
         secret=_TEST_SECRET,
+        scope_fp=_TEST_SCOPE_FP,
         budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
@@ -514,6 +513,10 @@ async def test_execute_sql_query_offset_pagination_offset_cap_enforced(monkeypat
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
             side_effect=lambda *_args, **_kwargs: _conn_ctx(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
         ),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
@@ -570,6 +573,7 @@ async def test_execute_sql_query_offset_pagination_rejects_expired_cursor_stable
         issued_at=0,
         max_age_s=1,
         secret=_TEST_SECRET,
+        scope_fp=_TEST_SCOPE_FP,
         budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
@@ -585,6 +589,10 @@ async def test_execute_sql_query_offset_pagination_rejects_expired_cursor_stable
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
             return_value=_conn_ctx(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
         ),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
@@ -640,6 +648,7 @@ async def test_execute_sql_query_offset_pagination_query_fp_mismatch_in_strict_m
         issued_at=int(time.time()),
         query_fp="query-fp-a",
         secret=_TEST_SECRET,
+        scope_fp=_TEST_SCOPE_FP,
         budget_snapshot=_BUDGET_SNAPSHOT,
     )
     monkeypatch.setenv("PAGINATION_CURSOR_BIND_QUERY_FINGERPRINT", "true")
@@ -660,6 +669,10 @@ async def test_execute_sql_query_offset_pagination_query_fp_mismatch_in_strict_m
         patch(
             "mcp_server.tools.execute_sql_query.build_cursor_query_fingerprint",
             return_value="query-fp-b",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
         ),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
@@ -714,6 +727,7 @@ async def test_execute_sql_query_offset_budget_snapshot_tamper_is_rejected():
         fingerprint=fingerprint,
         issued_at=int(time.time()),
         secret=_TEST_SECRET,
+        scope_fp=_TEST_SCOPE_FP,
         budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
@@ -744,6 +758,10 @@ async def test_execute_sql_query_offset_budget_snapshot_tamper_is_rejected():
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
             return_value=_conn_ctx(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
         ),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
@@ -878,6 +896,7 @@ async def test_execute_sql_query_offset_cursor_telemetry_parity_deterministic_cl
         issued_at=1_000,
         max_age_s=600,
         secret=_TEST_SECRET,
+        scope_fp=_TEST_SCOPE_FP,
         budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
@@ -893,6 +912,10 @@ async def test_execute_sql_query_offset_cursor_telemetry_parity_deterministic_cl
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
             return_value=_conn_ctx(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
         ),
         patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
         patch("dal.pagination_cursor.time.time", return_value=1_120),
