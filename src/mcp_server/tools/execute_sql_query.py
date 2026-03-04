@@ -58,6 +58,7 @@ from dal.pagination_cursor import (
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
     CursorSigningSecrets,
+    build_cursor_scope_fingerprint,
 )
 from dal.postgres_sandbox import (
     SANDBOX_FAILURE_NONE,
@@ -3076,6 +3077,7 @@ async def handler(
         offset_next_token_payload: dict[str, int] | None = None
         query_fingerprint = None  # Bound to backend signature inside connection block
         cursor_query_fingerprint = None
+        cursor_scope_fingerprint = None
 
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
             keyset_cursor_context = _extract_keyset_cursor_context(conn)
@@ -3103,6 +3105,18 @@ async def handler(
                 pagination_mode=pagination_mode,
                 order_signature=keyset_signature_for_fingerprint,
             )
+            cursor_scope_fingerprint = build_cursor_scope_fingerprint(
+                tenant_id=tenant_id,
+                provider_name=provider,
+                provider_mode=execution_topology,
+                tenant_enforcement_mode=getattr(caps, "tenant_enforcement_mode", None),
+                pagination_mode=pagination_mode,
+                query_fingerprint=cursor_query_fingerprint,
+            )
+            tenant_enforcement_metadata["pagination.cursor.scope_bound"] = bool(
+                cursor_scope_fingerprint
+            )
+            tenant_enforcement_metadata["pagination.cursor.scope_mismatch"] = False
             query_fingerprint = build_query_fingerprint(
                 sql=effective_sql_query,
                 params=effective_params,
@@ -3781,6 +3795,7 @@ async def handler(
                 secret=pagination_token_secret or None,
                 max_age_s=cursor_max_age_seconds,
                 query_fp=(cursor_query_fingerprint if cursor_bind_query_fingerprint else None),
+                scope_fp=cursor_scope_fingerprint,
                 budget_snapshot=execution_budget.to_snapshot(),
             )
 
@@ -3860,6 +3875,7 @@ async def handler(
                     cursor_context=keyset_cursor_context or None,
                     max_age_s=cursor_max_age_seconds,
                     query_fp=(cursor_query_fingerprint if cursor_bind_query_fingerprint else None),
+                    scope_fp=cursor_scope_fingerprint,
                     budget_snapshot=execution_budget.to_snapshot(),
                 )
                 tenant_enforcement_metadata["next_keyset_cursor"] = next_keyset_cursor

@@ -19,6 +19,7 @@ from dal.pagination_cursor import (
     PAGINATION_CURSOR_SIGNATURE_INVALID,
     bounded_cursor_age_seconds,
     cursor_now_epoch_seconds,
+    normalize_cursor_scope_fingerprint,
     normalize_optional_int,
     normalize_strict_int,
 )
@@ -115,6 +116,7 @@ def encode_offset_pagination_token(
     max_age_s: int | None = None,
     now_epoch_seconds: int | None = None,
     query_fp: str | None = None,
+    scope_fp: str | None = None,
     budget_snapshot: dict[str, Any] | None = None,
 ) -> str:
     """Encode a deterministic opaque pagination token."""
@@ -133,6 +135,9 @@ def encode_offset_pagination_token(
     normalized_query_fp = str(query_fp).strip() if isinstance(query_fp, str) else ""
     if normalized_query_fp:
         payload["query_fp"] = normalized_query_fp
+    normalized_scope_fp = normalize_cursor_scope_fingerprint(scope_fp)
+    if normalized_scope_fp:
+        payload["scope_fp"] = normalized_scope_fp
     if budget_snapshot is not None:
         normalized_budget_snapshot = ExecutionBudget.from_snapshot(budget_snapshot).to_snapshot()
         payload["budget_snapshot"] = normalized_budget_snapshot

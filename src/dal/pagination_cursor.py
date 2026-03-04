@@ -31,6 +31,8 @@ Failure reason codes (bounded set)
   - ``PAGINATION_CURSOR_CLOCK_SKEW``       — issued_at too far in the future
   - ``PAGINATION_CURSOR_ISSUED_AT_INVALID``— missing or non-integer issued_at
   - ``PAGINATION_CURSOR_QUERY_MISMATCH``   — query fingerprint mismatch
+  - ``PAGINATION_CURSOR_SCOPE_MISSING``    — bound scope fingerprint absent
+  - ``PAGINATION_CURSOR_SCOPE_MISMATCH``   — bound scope fingerprint mismatch
   - ``KEYSET_CURSOR_ORDERBY_MISMATCH``     — ORDER BY key drift
   - ``KEYSET_SNAPSHOT_MISMATCH``           — cursor context drift (snapshot)
   - ``KEYSET_TOPOLOGY_MISMATCH``           — cursor context drift (topology)
@@ -64,6 +66,8 @@ require_issued_at=True).
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -72,7 +76,10 @@ from typing import Any
 PAGINATION_CURSOR_SECRET_MISSING = "PAGINATION_CURSOR_SECRET_MISSING"
 PAGINATION_CURSOR_SECRET_WEAK = "PAGINATION_CURSOR_SECRET_WEAK"
 PAGINATION_CURSOR_SIGNATURE_INVALID = "PAGINATION_CURSOR_SIGNATURE_INVALID"
+PAGINATION_CURSOR_SCOPE_MISSING = "PAGINATION_CURSOR_SCOPE_MISSING"
+PAGINATION_CURSOR_SCOPE_MISMATCH = "PAGINATION_CURSOR_SCOPE_MISMATCH"
 PAGINATION_CURSOR_MIN_SECRET_BYTES = 32
+PAGINATION_CURSOR_SCOPE_FINGERPRINT_HEX_LENGTH = 16
 
 _PRIMARY_CURSOR_SECRET_ENV = "PAGINATION_CURSOR_HMAC_SECRET"
 _LEGACY_CURSOR_SECRET_ENV = "PAGINATION_CURSOR_SIGNING_SECRET"
@@ -216,3 +223,52 @@ def bounded_cursor_age_seconds(age_seconds: int, *, max_bound: int = 604_800) ->
     if age_seconds < 0:
         return 0
     return min(int(age_seconds), int(max_bound))
+
+
+def normalize_cursor_scope_fingerprint(value: Any) -> str:
+    """Normalize bounded scope fingerprints to lowercase fixed-length hex."""
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip().lower()
+    if len(normalized) != PAGINATION_CURSOR_SCOPE_FINGERPRINT_HEX_LENGTH:
+        return ""
+    if any(ch not in "0123456789abcdef" for ch in normalized):
+        return ""
+    return normalized
+
+
+def build_cursor_scope_fingerprint(
+    *,
+    tenant_id: int | str | None,
+    provider_name: str | None,
+    provider_mode: str | None,
+    tenant_enforcement_mode: str | None,
+    pagination_mode: str | None,
+    query_fingerprint: str | None,
+) -> str:
+    """Build deterministic bounded scope fingerprint used for cursor binding.
+
+    The resulting value is a fixed-width prefix of SHA-256 over canonical JSON.
+    Only normalized bounded fields are included to keep behavior deterministic.
+    """
+    normalized_tenant: int | str | None
+    if tenant_id is None:
+        normalized_tenant = None
+    elif isinstance(tenant_id, bool):
+        normalized_tenant = int(tenant_id)
+    elif isinstance(tenant_id, int):
+        normalized_tenant = int(tenant_id)
+    else:
+        normalized_tenant = str(tenant_id).strip() or None
+
+    scope_struct = {
+        "tenant_id": normalized_tenant,
+        "provider_name": str(provider_name or "").strip().lower(),
+        "provider_mode": str(provider_mode or "").strip().lower(),
+        "tenant_enforcement_mode": str(tenant_enforcement_mode or "").strip().lower(),
+        "pagination_mode": str(pagination_mode or "").strip().lower(),
+        "query_fp": str(query_fingerprint or "").strip().lower(),
+    }
+    payload = json.dumps(scope_struct, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    digest_hex = hashlib.sha256(payload).hexdigest()
+    return digest_hex[:PAGINATION_CURSOR_SCOPE_FINGERPRINT_HEX_LENGTH]
