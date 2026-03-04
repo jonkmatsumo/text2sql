@@ -74,6 +74,8 @@ async def test_scope_binding_rejects_cross_tenant_cursor_reuse():
     ):
         first_payload = await handler(sql, tenant_id=1, page_size=2)
         first = json.loads(first_payload)
+        assert first["metadata"].get("pagination.cursor.scope_bound") is True
+        assert first["metadata"].get("pagination.cursor.scope_mismatch") is False
         token = first["metadata"]["next_page_token"]
         assert token
 
@@ -83,6 +85,10 @@ async def test_scope_binding_rejects_cross_tenant_cursor_reuse():
     assert second["error"]["category"] == "invalid_request"
     assert second["error"]["error_code"] == "VALIDATION_ERROR"
     assert second["error"]["details_safe"]["reason_code"] == PAGINATION_CURSOR_SCOPE_MISMATCH
+    metadata = second["metadata"]
+    assert metadata.get("pagination.cursor.scope_bound") is True
+    assert metadata.get("pagination.cursor.scope_mismatch") is True
+    assert metadata.get("pagination.cursor.decode_reason_code") == PAGINATION_CURSOR_SCOPE_MISMATCH
 
 
 @pytest.mark.asyncio
@@ -117,6 +123,10 @@ async def test_scope_binding_rejects_cross_query_cursor_reuse():
     assert second["error"]["category"] == "invalid_request"
     assert second["error"]["error_code"] == "VALIDATION_ERROR"
     assert second["error"]["details_safe"]["reason_code"] == PAGINATION_CURSOR_SCOPE_MISMATCH
+    metadata = second["metadata"]
+    assert metadata.get("pagination.cursor.scope_bound") is True
+    assert metadata.get("pagination.cursor.scope_mismatch") is True
+    assert metadata.get("pagination.cursor.decode_reason_code") == PAGINATION_CURSOR_SCOPE_MISMATCH
 
 
 @pytest.mark.asyncio
@@ -166,6 +176,10 @@ async def test_scope_binding_rejects_cross_provider_cursor_reuse():
     assert second["error"]["category"] == "invalid_request"
     assert second["error"]["error_code"] == "VALIDATION_ERROR"
     assert second["error"]["details_safe"]["reason_code"] == PAGINATION_CURSOR_SCOPE_MISMATCH
+    metadata = second["metadata"]
+    assert metadata.get("pagination.cursor.scope_bound") is True
+    assert metadata.get("pagination.cursor.scope_mismatch") is True
+    assert metadata.get("pagination.cursor.decode_reason_code") == PAGINATION_CURSOR_SCOPE_MISMATCH
 
 
 @pytest.mark.asyncio
@@ -218,6 +232,7 @@ async def test_scope_binding_rejects_cross_mode_cursor_reuse():
         ),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.mcp_metrics.add_counter") as add_counter,
     ):
         payload = await handler(sql, tenant_id=1, page_size=2, page_token=token)
 
@@ -225,3 +240,15 @@ async def test_scope_binding_rejects_cross_mode_cursor_reuse():
     assert result["error"]["category"] == "invalid_request"
     assert result["error"]["error_code"] == "VALIDATION_ERROR"
     assert result["error"]["details_safe"]["reason_code"] == PAGINATION_CURSOR_SCOPE_MISMATCH
+    metadata = result["metadata"]
+    assert metadata.get("pagination.cursor.scope_bound") is True
+    assert metadata.get("pagination.cursor.scope_mismatch") is True
+    assert metadata.get("pagination.cursor.decode_reason_code") == PAGINATION_CURSOR_SCOPE_MISMATCH
+    matching_calls = [
+        call
+        for call in add_counter.call_args_list
+        if call.args and call.args[0] == "pagination.cursor.scope_binding_failure_total"
+    ]
+    assert matching_calls
+    attrs = matching_calls[-1].kwargs.get("attributes", {})
+    assert attrs.get("reason_code") == PAGINATION_CURSOR_SCOPE_MISMATCH

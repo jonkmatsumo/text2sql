@@ -243,6 +243,10 @@ _CURSOR_SECRET_MISCONFIG_REASON_ALLOWLIST = {
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
 }
+_CURSOR_SCOPE_BINDING_REASON_ALLOWLIST = {
+    PAGINATION_CURSOR_SCOPE_MISSING,
+    PAGINATION_CURSOR_SCOPE_MISMATCH,
+}
 
 
 @dataclass(frozen=True)
@@ -564,32 +568,55 @@ def _bounded_cursor_decode_reason_code(raw_reason_code: Any) -> str | None:
 
 def _cursor_secret_observability_fields(
     metadata: dict[str, Any] | None,
-) -> tuple[bool, bool, str | None]:
+) -> tuple[bool, bool, bool, bool, str | None]:
     cursor_metadata = metadata if isinstance(metadata, dict) else {}
     secret_configured = cursor_metadata.get("pagination.cursor.secret_configured")
     if secret_configured is None:
         secret_configured = cursor_metadata.get("pagination.cursor.signing_secret_configured")
     secret_valid = cursor_metadata.get("pagination.cursor.secret_valid")
+    scope_bound = bool(cursor_metadata.get("pagination.cursor.scope_bound"))
+    scope_mismatch = bool(cursor_metadata.get("pagination.cursor.scope_mismatch"))
     decode_reason_code = _bounded_cursor_decode_reason_code(
         cursor_metadata.get("pagination.cursor.decode_reason_code")
     )
-    return bool(secret_configured), bool(secret_valid), decode_reason_code
+    return (
+        bool(secret_configured),
+        bool(secret_valid),
+        scope_bound,
+        scope_mismatch,
+        decode_reason_code,
+    )
 
 
 def _record_cursor_secret_observability(metadata: dict[str, Any] | None) -> None:
-    secret_configured, secret_valid, decode_reason_code = _cursor_secret_observability_fields(
-        metadata
-    )
+    (
+        secret_configured,
+        secret_valid,
+        scope_bound,
+        scope_mismatch,
+        decode_reason_code,
+    ) = _cursor_secret_observability_fields(metadata)
     span = trace.get_current_span()
     if span is not None and span.is_recording():
         span.set_attribute("pagination.cursor.secret_configured", secret_configured)
         span.set_attribute("pagination.cursor.secret_valid", secret_valid)
+        span.set_attribute("pagination.cursor.scope_bound", scope_bound)
+        span.set_attribute("pagination.cursor.scope_mismatch", scope_mismatch)
         if decode_reason_code is not None:
             span.set_attribute("pagination.cursor.decode_reason_code", decode_reason_code)
     if decode_reason_code in _CURSOR_SECRET_MISCONFIG_REASON_ALLOWLIST:
         mcp_metrics.add_counter(
             "pagination.cursor.secret_misconfig_total",
             description="Count of pagination cursor secret misconfiguration rejections",
+            attributes={
+                "tool_name": TOOL_NAME,
+                "reason_code": decode_reason_code,
+            },
+        )
+    if decode_reason_code in _CURSOR_SCOPE_BINDING_REASON_ALLOWLIST:
+        mcp_metrics.add_counter(
+            "pagination.cursor.scope_binding_failure_total",
+            description="Count of pagination cursor scope-binding decode failures",
             attributes={
                 "tool_name": TOOL_NAME,
                 "reason_code": decode_reason_code,
@@ -3025,6 +3052,8 @@ async def handler(
         cursor_signing_secrets.configured
     )
     tenant_enforcement_metadata["pagination.cursor.secret_valid"] = cursor_signing_secrets.valid
+    tenant_enforcement_metadata["pagination.cursor.scope_bound"] = False
+    tenant_enforcement_metadata["pagination.cursor.scope_mismatch"] = False
     if page_token is not None:
         normalized_page_token = page_token.strip()
         if not normalized_page_token:
@@ -4138,6 +4167,12 @@ async def handler(
                 ),
                 "pagination.cursor.secret_valid": tenant_enforcement_metadata.get(
                     "pagination.cursor.secret_valid"
+                ),
+                "pagination.cursor.scope_bound": tenant_enforcement_metadata.get(
+                    "pagination.cursor.scope_bound"
+                ),
+                "pagination.cursor.scope_mismatch": tenant_enforcement_metadata.get(
+                    "pagination.cursor.scope_mismatch"
                 ),
                 "pagination.cursor.decode_reason_code": tenant_enforcement_metadata.get(
                     "pagination.cursor.decode_reason_code"
