@@ -29,6 +29,23 @@ _STRUCTURED_DRIFT_CODE_FRAGMENTS = (
     "MISSING_TABLE",
 )
 _SQLSTATE_IN_TEXT_RE = re.compile(r"(?:sqlstate|sql state)\s*[:=]?\s*([0-9A-Z]{5})", re.IGNORECASE)
+_DRIFT_RESOLUTION_MODES = {"alias", "stage", "latest", "none"}
+_DRIFT_ERROR_CODE_ALIASES = {
+    "no_reference_model": "no_reference_model",
+    "reference_unavailable": "no_reference_model",
+    "missing_reference_model": "no_reference_model",
+    "schema_snapshot_unavailable": "no_reference_model",
+    "insufficient_reference_samples": "insufficient_reference_samples",
+    "insufficient_samples": "insufficient_reference_samples",
+    "not_enough_reference_samples": "insufficient_reference_samples",
+    "psi_sparse_buckets": "psi_sparse_buckets",
+    "psi_suppressed_sparse_buckets": "psi_sparse_buckets",
+    "sparse_buckets": "psi_sparse_buckets",
+    "none": "none",
+    "ok": "none",
+    "success": "none",
+}
+_DRIFT_ERROR_MESSAGE_MAX_LEN = 200
 
 
 @dataclass(frozen=True)
@@ -38,6 +55,109 @@ class DriftDetectionResult:
     missing_identifiers: List[str]
     method: DriftDetectionMethod
     source: str
+    error_code: str | None
+    error_message: str | None
+    resolution_mode: str
+    reference_model_version: str | None
+    bucketing_requested: bool | None
+    bucketing_used: bool | None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a stable contract surface for diagnostics and tests."""
+        return {
+            "missing_identifiers": list(self.missing_identifiers),
+            "method": self.method.value,
+            "source": self.source,
+            "error_code": self.error_code,
+            "error_message": self.error_message,
+            "resolution_mode": self.resolution_mode,
+            "reference_model_version": self.reference_model_version,
+            "bucketing_requested": self.bucketing_requested,
+            "bucketing_used": self.bucketing_used,
+        }
+
+
+def _bounded_text(value: Any, *, max_length: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized[:max_length]
+
+
+def _normalize_error_code(raw: Any) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    normalized = raw.strip().lower()
+    if not normalized:
+        return None
+    return _DRIFT_ERROR_CODE_ALIASES.get(normalized)
+
+
+def _extract_resolution_mode(
+    error_metadata: Mapping[str, Any] | None, *, has_reference: bool
+) -> str:
+    if error_metadata:
+        for key in ("resolution_mode", "reference_resolution_mode"):
+            normalized = _bounded_text(error_metadata.get(key), max_length=16)
+            if normalized and normalized.lower() in _DRIFT_RESOLUTION_MODES:
+                return normalized.lower()
+    return "latest" if has_reference else "none"
+
+
+def _extract_reference_model_version(error_metadata: Mapping[str, Any] | None) -> str | None:
+    if not error_metadata:
+        return None
+    for key in ("reference_model_version", "reference_version", "model_version"):
+        normalized = _bounded_text(error_metadata.get(key), max_length=128)
+        if normalized:
+            return normalized
+    return None
+
+
+def _extract_optional_bool(error_metadata: Mapping[str, Any] | None, key: str) -> bool | None:
+    if not error_metadata:
+        return None
+    value = error_metadata.get(key)
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _derive_error_code(
+    *,
+    error_message: str,
+    error_metadata: Mapping[str, Any] | None,
+    has_reference: bool,
+) -> str | None:
+    if error_metadata:
+        explicit_code = _normalize_error_code(error_metadata.get("drift_error_code"))
+        if explicit_code:
+            return explicit_code
+        for code_candidate in _iter_code_candidates(error_metadata):
+            normalized = _normalize_error_code(code_candidate)
+            if normalized:
+                return normalized
+
+    message = (error_message or "").strip().lower()
+    if not message:
+        return None
+
+    if "psi" in message and "sparse" in message and "bucket" in message:
+        return "psi_sparse_buckets"
+    if "insufficient" in message and "sample" in message and "reference" in message:
+        return "insufficient_reference_samples"
+    if (
+        "no reference" in message
+        or "reference unavailable" in message
+        or "reference model not found" in message
+    ):
+        return "no_reference_model"
+    if not has_reference:
+        return "no_reference_model"
+
+    return None
 
 
 def _iter_code_candidates(value: Any) -> list[str]:
@@ -272,8 +392,39 @@ def detect_schema_drift_details(
     if structured_signal and missing_identifiers:
         source = "structured"
 
+    schema_reference = _build_schema_set(raw_schema_context)
+    has_reference = bool(schema_reference)
+    metadata_map = error_metadata if isinstance(error_metadata, dict) else None
+    error_code = _derive_error_code(
+        error_message=error_message,
+        error_metadata=metadata_map,
+        has_reference=has_reference,
+    )
+    raw_error_message = (
+        _bounded_text(
+            metadata_map.get("drift_error_message") if metadata_map else None,
+            max_length=_DRIFT_ERROR_MESSAGE_MAX_LEN,
+        )
+        or _bounded_text(
+            metadata_map.get("error_message") if metadata_map else None,
+            max_length=_DRIFT_ERROR_MESSAGE_MAX_LEN,
+        )
+        or _bounded_text(error_message, max_length=_DRIFT_ERROR_MESSAGE_MAX_LEN)
+    )
+    error_message_out = raw_error_message if error_code and error_code != "none" else None
+    resolution_mode = _extract_resolution_mode(metadata_map, has_reference=has_reference)
+    reference_model_version = _extract_reference_model_version(metadata_map)
+    bucketing_requested = _extract_optional_bool(metadata_map, "bucketing_requested")
+    bucketing_used = _extract_optional_bool(metadata_map, "bucketing_used")
+
     return DriftDetectionResult(
         missing_identifiers=missing_identifiers,
         method=method,
         source=source,
+        error_code=error_code,
+        error_message=error_message_out,
+        resolution_mode=resolution_mode,
+        reference_model_version=reference_model_version,
+        bucketing_requested=bucketing_requested,
+        bucketing_used=bucketing_used,
     )

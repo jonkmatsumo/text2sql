@@ -1,11 +1,14 @@
-# ModelManager Diagnostics Snapshot Contract (v4)
+# ModelManager Diagnostics Snapshot Contract (v5)
 
-This document defines the operator-facing contract for the `model_manager` diagnostics snapshot emitted by `build_operator_diagnostics()`.
+This document defines the operator-facing contract for `build_operator_diagnostics()`, including both:
+
+- `model_manager` snapshot (legacy surface)
+- `ml_health` summary (bounded operational health surface)
 
 ## Location
 
 - Builder: `src/common/config/model_manager_operability.py`
-- Surface: `src/common/config/diagnostics.py` (`model_manager` key)
+- Surface: `src/common/config/diagnostics.py` (`model_manager` and `ml_health` keys)
 
 ## Baseline Required Fields
 
@@ -56,3 +59,70 @@ Any non-allowlisted value is normalized to `null`.
   "drift_fallback_reason": null
 }
 ```
+
+## ML Health Summary (`diagnostics.ml_health`)
+
+`ml_health` is a compact, bounded payload with stable section keys:
+
+- `model`
+- `benchmark`
+- `drift`
+- `feature_coverage`
+- `config`
+
+### `model`
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `state` | `string` | Bounded manager state string. |
+| `active_model_version` | `string` | Active model version, or `unknown`. |
+| `last_reload_status` | `string` | Last reload status. |
+| `last_reload_ts` | `string \| null` | Last reload timestamp if available. |
+| `schema_mismatch_detected` | `boolean` | Drift/schema mismatch marker. |
+
+### `benchmark`
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `enabled` | `boolean` | Whether benchmark signal is enabled/tracked. |
+| `last_status` | `string \| null` | Last benchmark status if tracked. |
+| `last_run_ts` | `string \| null` | Last benchmark run timestamp if tracked. |
+
+### `drift`
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `reference_resolution_mode` | `string` | Compatibility alias for resolution mode. |
+| `last_error_code` | `string \| null` | Compatibility alias for drift error code. |
+| `error_code` | `string \| null` | Canonical bounded drift reason code. |
+| `error_message` | `string \| null` | Short bounded message (`<=200` chars). |
+| `resolution_mode` | `string` | One of `alias`, `stage`, `latest`, `none`. |
+| `reference_model_version` | `string \| null` | Resolved reference model version, if known. |
+| `bucketing_requested` | `boolean \| null` | Bucketing request marker, if tracked. |
+| `bucketing_used` | `boolean \| null` | Bucketing usage marker, if tracked. |
+
+Canonical `error_code` intent:
+
+- `no_reference_model`: no usable reference baseline was available.
+- `insufficient_reference_samples`: reference baseline exists but sample volume is too low.
+- `psi_sparse_buckets`: PSI/similar bucketed drift metric was suppressed due to sparse buckets.
+- `none` or `null`: no drift error was detected.
+
+### `feature_coverage`
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `last_ratio` | `number \| null` | Bounded to `[0, 1]` if tracked. |
+| `below_threshold` | `boolean \| null` | Coverage threshold indicator if tracked. |
+
+### `config` (effective strict-mode visibility)
+
+| Field | Type | Env/Source |
+| --- | --- | --- |
+| `strict_feature_schema` | `boolean` | `MODEL_MANAGER_STRICT_SCHEMA_MODE` |
+| `strict_tuning_resume_validation` | `boolean` | `MODEL_MANAGER_STRICT_RELOAD_MODE` |
+| `strict_split_strategy_validation` | `boolean` | `MODEL_MANAGER_DRIFT_STRICT_MODE` |
+| `strict_calibration_validation` | `boolean` | `MODEL_MANAGER_CALIBRATION_STRICT_MODE` |
+| `strict_schema_mismatch_blocking` | `boolean` | `AGENT_BLOCK_ON_SCHEMA_MISMATCH` |
+
+All `config` values default to `false` unless explicitly enabled.

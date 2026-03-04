@@ -153,3 +153,77 @@ def test_detect_schema_drift_uses_regex_source_without_structured_metadata():
     assert "missing_table" in result.missing_identifiers
     assert result.source == "regex"
     assert result.method == DriftDetectionMethod.REGEX_FALLBACK
+
+
+def test_drift_contract_no_reference_model_available():
+    """Drift contract should report bounded metadata when reference context is unavailable."""
+    result = detect_schema_drift_details(
+        sql="SELECT * FROM users",
+        error_message="Reference model unavailable for drift check",
+        provider="postgres",
+        raw_schema_context=[],
+        error_metadata=None,
+    )
+
+    assert result.error_code == "no_reference_model"
+    assert result.error_message == "Reference model unavailable for drift check"
+    assert len(result.error_message) <= 200
+    assert result.resolution_mode == "none"
+    assert result.reference_model_version is None
+    assert result.bucketing_requested is None
+    assert result.bucketing_used is None
+
+
+def test_drift_contract_insufficient_reference_samples_metadata():
+    """Explicit insufficient-sample metadata should map to canonical drift fields."""
+    result = detect_schema_drift_details(
+        sql="SELECT email FROM users",
+        error_message="Reference sample count below minimum",
+        provider="postgres",
+        raw_schema_context=[{"type": "Table", "name": "users"}],
+        error_metadata={
+            "drift_error_code": "insufficient_reference_samples",
+            "drift_error_message": "Need >=100 reference rows for drift estimation",
+            "reference_resolution_mode": "stage",
+            "reference_model_version": "model-v7",
+            "bucketing_requested": True,
+            "bucketing_used": False,
+        },
+    )
+
+    assert result.error_code == "insufficient_reference_samples"
+    assert result.error_message == "Need >=100 reference rows for drift estimation"
+    assert result.resolution_mode == "stage"
+    assert result.reference_model_version == "model-v7"
+    assert result.bucketing_requested is True
+    assert result.bucketing_used is False
+
+
+def test_drift_contract_sparse_bucket_psi_suppression_maps_to_canonical_code():
+    """PSI sparse-bucket suppression should map to a stable canonical error code."""
+    result = detect_schema_drift_details(
+        sql="SELECT id FROM users",
+        error_message="PSI suppressed due to sparse buckets in reference histogram",
+        provider="postgres",
+        raw_schema_context=[{"type": "Table", "name": "users"}],
+        error_metadata={"resolution_mode": "alias"},
+    )
+
+    assert result.error_code == "psi_sparse_buckets"
+    assert result.error_message == "PSI suppressed due to sparse buckets in reference histogram"
+    assert result.resolution_mode == "alias"
+
+
+def test_drift_contract_success_path_keeps_error_fields_empty(raw_schema_context):
+    """Successful drift detection should keep standardized error fields empty."""
+    result = detect_schema_drift_details(
+        sql="SELECT name FROM users",
+        error_message="",
+        provider="postgres",
+        raw_schema_context=raw_schema_context,
+        error_metadata=None,
+    )
+
+    assert result.error_code is None
+    assert result.error_message is None
+    assert result.resolution_mode == "latest"

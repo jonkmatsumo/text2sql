@@ -111,6 +111,7 @@ class AgentDiagnosticsResponse(BaseModel):
     schema_cache_ttl_seconds: int
     runtime_indicators: dict[str, Any]
     enabled_flags: dict[str, Any]
+    ml_health: Optional[dict[str, Any]] = None
     monitor_snapshot: Optional[dict[str, Any]] = None
     run_summary_store: Optional[dict[str, Any]] = None
     audit_events: Optional[list[dict[str, Any]]] = None
