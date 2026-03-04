@@ -21,7 +21,7 @@ from mcp_server.tools.execute_sql_query import handler as mcp_execute_sql_query_
 
 pytestmark = pytest.mark.pagination
 
-_TEST_SECRET = "test-pagination-secret"
+_TEST_SECRET = "test-pagination-secret-for-unit-tests-2026"
 _BUDGET_SNAPSHOT = {
     "max_total_rows": 1000,
     "max_total_bytes": 1_000_000,

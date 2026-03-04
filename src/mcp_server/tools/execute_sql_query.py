@@ -56,8 +56,8 @@ from dal.offset_pagination import (
 )
 from dal.pagination_cursor import (
     PAGINATION_CURSOR_SECRET_MISSING,
-    CursorSigningSecretMissing,
-    resolve_cursor_signing_secret,
+    PAGINATION_CURSOR_SECRET_WEAK,
+    CursorSigningSecrets,
 )
 from dal.postgres_sandbox import (
     SANDBOX_FAILURE_NONE,
@@ -151,6 +151,9 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "PAGINATION_CURSOR_ISSUED_AT_INVALID",
     "PAGINATION_CURSOR_CLOCK_SKEW",
     "PAGINATION_CURSOR_QUERY_MISMATCH",
+    PAGINATION_CURSOR_SECRET_MISSING,
+    PAGINATION_CURSOR_SECRET_WEAK,
+    "PAGINATION_CURSOR_SIGNATURE_INVALID",
     PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED,
     PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED,
     PAGINATION_GLOBAL_TIME_BUDGET_EXCEEDED,
@@ -197,6 +200,7 @@ _CURSOR_VALIDATION_OUTCOME_ALLOWLIST = {
     "LEGACY_ACCEPTED",
     "SIGNATURE_INVALID",
     "SECRET_MISSING",
+    "SECRET_WEAK",
 }
 _CURSOR_AGE_BUCKET_ALLOWLIST = {
     "0_59",
@@ -672,6 +676,7 @@ def _cursor_validation_outcome_from_reason_code(reason_code: Any) -> str | None:
         "PAGINATION_CURSOR_QUERY_MISMATCH": "QUERY_MISMATCH",
         "PAGINATION_CURSOR_SIGNATURE_INVALID": "SIGNATURE_INVALID",
         "PAGINATION_CURSOR_SECRET_MISSING": "SECRET_MISSING",
+        "PAGINATION_CURSOR_SECRET_WEAK": "SECRET_WEAK",
     }
     return mapping.get(reason)
 
@@ -2917,15 +2922,12 @@ async def handler(
             or _DEFAULT_PAGINATION_MAX_OFFSET_PAGES
         ),
     )
-    try:
-        pagination_token_secret = resolve_cursor_signing_secret()
-    except CursorSigningSecretMissing:
-        pagination_token_secret = None
-        _pagination_signing_available = False
-    else:
-        _pagination_signing_available = True
+    cursor_signing_secrets = CursorSigningSecrets.from_env()
+    pagination_token_secret = cursor_signing_secrets.secret
+    _pagination_signing_available = cursor_signing_secrets.valid
+    pagination_secret_failure_reason_code = cursor_signing_secrets.reason_code
     tenant_enforcement_metadata["pagination.cursor.signing_secret_configured"] = (
-        _pagination_signing_available
+        cursor_signing_secrets.configured
     )
     if page_token is not None:
         normalized_page_token = page_token.strip()
@@ -3206,12 +3208,16 @@ async def handler(
 
                 if keyset_cursor:
                     if not _pagination_signing_available:
+                        secret_reason_code = (
+                            pagination_secret_failure_reason_code
+                            or PAGINATION_CURSOR_SECRET_MISSING
+                        )
                         return _construct_error_response(
                             execution_started_at,
-                            "Cursor signing secret is not configured.",
+                            "Cursor signing secret is unavailable due to configuration policy.",
                             category=ErrorCategory.INVALID_REQUEST,
                             provider=provider,
-                            metadata={"reason_code": PAGINATION_CURSOR_SECRET_MISSING},
+                            metadata={"reason_code": secret_reason_code},
                             envelope_metadata=tenant_enforcement_metadata,
                         )
                     keyset_decode_metadata: dict[str, Any] = {}
@@ -3418,9 +3424,16 @@ async def handler(
                     pagination_limit = int(effective_page_size or 0)
                     if page_token:
                         if not _pagination_signing_available:
+                            secret_reason_code = (
+                                pagination_secret_failure_reason_code
+                                or PAGINATION_CURSOR_SECRET_MISSING
+                            )
                             raise OffsetPaginationTokenError(
-                                reason_code=PAGINATION_CURSOR_SECRET_MISSING,
-                                message="Cursor signing secret is not configured.",
+                                reason_code=secret_reason_code,
+                                message=(
+                                    "Cursor signing secret is unavailable due to configuration "
+                                    "policy."
+                                ),
                             )
                         offset_decode_metadata = {}
                         token_payload = decode_offset_pagination_token(
@@ -3498,9 +3511,16 @@ async def handler(
                     if len(rows) > pagination_limit:
                         rows = rows[:pagination_limit]
                         if not _pagination_signing_available:
+                            secret_reason_code = (
+                                pagination_secret_failure_reason_code
+                                or PAGINATION_CURSOR_SECRET_MISSING
+                            )
                             raise OffsetPaginationTokenError(
-                                reason_code=PAGINATION_CURSOR_SECRET_MISSING,
-                                message="Cursor signing secret is not configured.",
+                                reason_code=secret_reason_code,
+                                message=(
+                                    "Cursor signing secret is unavailable due to configuration "
+                                    "policy."
+                                ),
                             )
                         offset_next_token_payload = {
                             "offset": pagination_offset + pagination_limit,
@@ -3735,12 +3755,15 @@ async def handler(
                 )
             try:
                 if not _pagination_signing_available:
+                    secret_reason_code = (
+                        pagination_secret_failure_reason_code or PAGINATION_CURSOR_SECRET_MISSING
+                    )
                     return _construct_error_response(
                         execution_started_at,
-                        "Cursor signing secret is not configured.",
+                        "Cursor signing secret is unavailable due to configuration policy.",
                         category=ErrorCategory.INVALID_REQUEST,
                         provider=provider,
-                        metadata={"reason_code": PAGINATION_CURSOR_SECRET_MISSING},
+                        metadata={"reason_code": secret_reason_code},
                         envelope_metadata=tenant_enforcement_metadata,
                     )
                 keyset_vals = get_keyset_values(result_rows[cursor_row_index], keyset_order_keys)
