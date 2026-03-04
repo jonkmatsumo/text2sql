@@ -412,6 +412,32 @@ async def test_cursor_query_mismatch_classification_parity_between_mcp_and_agent
 
 
 @pytest.mark.asyncio
+async def test_cursor_scope_mismatch_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for cursor scope mismatches."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    page_one = await _invoke_mcp_federated_keyset(caps)
+    assert "error" not in page_one
+    cursor = page_one["metadata"]["next_keyset_cursor"]
+    assert cursor
+
+    with patch(
+        "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+        return_value="deadbeefdeadbeef",
+    ):
+        mcp_result = await _invoke_mcp_federated_keyset(caps, keyset_cursor=cursor)
+
+    await _assert_agent_reason_parity(mcp_result, "PAGINATION_CURSOR_SCOPE_MISMATCH")
+
+
+@pytest.mark.asyncio
 async def test_global_row_budget_classification_parity_between_mcp_ast_and_agent(monkeypatch):
     """Row-budget rejection classification should match across AST, MCP envelope, and agent."""
     caps = BackendCapabilities(
