@@ -365,6 +365,7 @@ class ExecuteSQLQueryMetadata(BaseModel):
             "LEGACY_ACCEPTED",
             "SIGNATURE_INVALID",
             "SECRET_MISSING",
+            "SECRET_WEAK",
         ]
     ] = Field(
         None,
@@ -375,6 +376,24 @@ class ExecuteSQLQueryMetadata(BaseModel):
         description="True when cursor signing secret is configured (fail-closed indicator)",
         validation_alias="pagination.cursor.signing_secret_configured",
         serialization_alias="pagination.cursor.signing_secret_configured",
+    )
+    pagination_cursor_secret_configured: Optional[bool] = Field(
+        None,
+        description="True when cursor signing secret is configured (canonical telemetry key)",
+        validation_alias="pagination.cursor.secret_configured",
+        serialization_alias="pagination.cursor.secret_configured",
+    )
+    pagination_cursor_secret_valid: Optional[bool] = Field(
+        None,
+        description="True when cursor signing secret is configured and meets policy checks",
+        validation_alias="pagination.cursor.secret_valid",
+        serialization_alias="pagination.cursor.secret_valid",
+    )
+    pagination_cursor_decode_reason_code: Optional[str] = Field(
+        None,
+        description="Bounded cursor decode failure classification reason code",
+        validation_alias="pagination.cursor.decode_reason_code",
+        serialization_alias="pagination.cursor.decode_reason_code",
     )
     pagination_cursor_signature_valid: Optional[bool] = Field(
         None,

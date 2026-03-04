@@ -37,7 +37,9 @@ def _set_pagination_signing_secret(monkeypatch):
     Production requires PAGINATION_CURSOR_SIGNING_SECRET to be set (fail-closed).
     Tests that verify signing behavior should override this via monkeypatch.
     """
-    monkeypatch.setenv("PAGINATION_CURSOR_SIGNING_SECRET", "test-pagination-secret")
+    monkeypatch.setenv(
+        "PAGINATION_CURSOR_SIGNING_SECRET", "test-pagination-secret-for-unit-tests-2026"
+    )
 
 
 def pytest_collection_modifyitems(config, items):

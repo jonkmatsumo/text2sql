@@ -40,19 +40,21 @@ Failure reason codes (bounded set)
 
 Cursor signing
   Cursor HMAC signing is **fail-closed by default**: if
-  ``PAGINATION_CURSOR_SIGNING_SECRET`` is not set and
-  ``PAGINATION_CURSOR_ALLOW_INSECURE_DEV_SECRET`` is not ``true``, any
-  pagination operation that requires a cursor will be rejected with
-  ``PAGINATION_CURSOR_SECRET_MISSING``.  Signature mismatches on decode
-  produce ``PAGINATION_CURSOR_SIGNATURE_INVALID``.
+  ``PAGINATION_CURSOR_HMAC_SECRET`` (preferred) or
+  ``PAGINATION_CURSOR_SIGNING_SECRET`` (legacy compatibility alias) is not set,
+  pagination operations that require cursor encode/decode are rejected with
+  ``PAGINATION_CURSOR_SECRET_MISSING``.
+  If a secret is configured but weaker than the minimum accepted length,
+  operations reject with ``PAGINATION_CURSOR_SECRET_WEAK``.
+  Signature mismatches on decode produce ``PAGINATION_CURSOR_SIGNATURE_INVALID``.
 
 Environment variables (resolved at the MCP handler layer)
   ``PAGINATION_CURSOR_MAX_AGE_SECONDS``              — int, default 3600
   ``PAGINATION_CURSOR_CLOCK_SKEW_SECONDS``           — int, default 300
   ``PAGINATION_CURSOR_REQUIRE_ISSUED_AT``            — bool, default True
   ``PAGINATION_CURSOR_BIND_QUERY_FINGERPRINT``       — bool, default True (keyset) / False (offset)
-  ``PAGINATION_CURSOR_SIGNING_SECRET``               — str, required (fail-closed)
-  ``PAGINATION_CURSOR_ALLOW_INSECURE_DEV_SECRET``    — bool, default False
+  ``PAGINATION_CURSOR_HMAC_SECRET``                  — str, required (preferred)
+  ``PAGINATION_CURSOR_SIGNING_SECRET``               — str, required fallback alias
   ``EXECUTION_PAGINATION_TOKEN_MAX_LENGTH``           — int, default per-module constant
 
 All env vars have safe defaults and are validated fail-closed: unset or
@@ -64,47 +66,123 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import dataclass
 from typing import Any
 
 PAGINATION_CURSOR_SECRET_MISSING = "PAGINATION_CURSOR_SECRET_MISSING"
+PAGINATION_CURSOR_SECRET_WEAK = "PAGINATION_CURSOR_SECRET_WEAK"
 PAGINATION_CURSOR_SIGNATURE_INVALID = "PAGINATION_CURSOR_SIGNATURE_INVALID"
+PAGINATION_CURSOR_MIN_SECRET_BYTES = 32
+
+_PRIMARY_CURSOR_SECRET_ENV = "PAGINATION_CURSOR_HMAC_SECRET"
+_LEGACY_CURSOR_SECRET_ENV = "PAGINATION_CURSOR_SIGNING_SECRET"
 
 
 class CursorSigningSecretMissing(ValueError):
-    """Raised when cursor signing secret is not configured and insecure mode is disabled."""
+    """Raised when cursor signing secret is not configured."""
 
     def __init__(self) -> None:
         """Initialize with the standard fail-closed reason code and guidance message."""
         super().__init__(
             f"{PAGINATION_CURSOR_SECRET_MISSING}: Cursor signing secret is not configured. "
-            "Set PAGINATION_CURSOR_SIGNING_SECRET or set "
-            "PAGINATION_CURSOR_ALLOW_INSECURE_DEV_SECRET=true for development."
+            f"Set {_PRIMARY_CURSOR_SECRET_ENV} (preferred) or "
+            f"{_LEGACY_CURSOR_SECRET_ENV} (legacy compatibility)."
         )
         self.reason_code = PAGINATION_CURSOR_SECRET_MISSING
+
+
+class CursorSigningSecretWeak(ValueError):
+    """Raised when cursor signing secret is configured but below minimum entropy length."""
+
+    def __init__(self) -> None:
+        """Initialize with a bounded reason code and non-sensitive guidance message."""
+        super().__init__(
+            f"{PAGINATION_CURSOR_SECRET_WEAK}: Cursor signing secret does not meet minimum "
+            f"length requirements. Configure {_PRIMARY_CURSOR_SECRET_ENV} (preferred) or "
+            f"{_LEGACY_CURSOR_SECRET_ENV} with at least {PAGINATION_CURSOR_MIN_SECRET_BYTES} "
+            "bytes."
+        )
+        self.reason_code = PAGINATION_CURSOR_SECRET_WEAK
+
+
+@dataclass(frozen=True)
+class CursorSigningSecrets:
+    """Normalized cursor-secret configuration state for fail-closed enforcement."""
+
+    secret: str | None
+    configured: bool
+    valid: bool
+    reason_code: str | None = None
+    source_env_var: str | None = None
+
+    @classmethod
+    def from_env(cls) -> "CursorSigningSecrets":
+        """Resolve cursor signing secret from environment with explicit migration behavior.
+
+        Secret precedence:
+        1. ``PAGINATION_CURSOR_HMAC_SECRET`` (preferred)
+        2. ``PAGINATION_CURSOR_SIGNING_SECRET`` (legacy fallback alias)
+        """
+        secret_value, source_env_var = _resolve_env_secret_value()
+        if secret_value is None:
+            return cls(
+                secret=None,
+                configured=False,
+                valid=False,
+                reason_code=PAGINATION_CURSOR_SECRET_MISSING,
+                source_env_var=None,
+            )
+
+        if len(secret_value.encode("utf-8")) < PAGINATION_CURSOR_MIN_SECRET_BYTES:
+            return cls(
+                secret=None,
+                configured=True,
+                valid=False,
+                reason_code=PAGINATION_CURSOR_SECRET_WEAK,
+                source_env_var=source_env_var,
+            )
+
+        return cls(
+            secret=secret_value,
+            configured=True,
+            valid=True,
+            reason_code=None,
+            source_env_var=source_env_var,
+        )
+
+    def require_valid_secret(self) -> str:
+        """Return the resolved secret or raise a bounded fail-closed error."""
+        if self.valid and self.secret is not None:
+            return self.secret
+        if self.reason_code == PAGINATION_CURSOR_SECRET_WEAK:
+            raise CursorSigningSecretWeak()
+        raise CursorSigningSecretMissing()
+
+
+def _resolve_env_secret_value() -> tuple[str | None, str | None]:
+    """Resolve non-empty secret from preferred env var first, then legacy alias."""
+    for env_name in (_PRIMARY_CURSOR_SECRET_ENV, _LEGACY_CURSOR_SECRET_ENV):
+        raw_value = os.environ.get(env_name)
+        if raw_value is None:
+            continue
+        stripped = raw_value.strip()
+        if stripped:
+            return stripped, env_name
+    return None, None
 
 
 def resolve_cursor_signing_secret(
     *,
     allow_unsigned: bool | None = None,
-) -> str | None:
+) -> str:
     """Resolve the cursor signing secret from environment configuration.
 
-    Fail-closed: raises ``CursorSigningSecretMissing`` when no secret is
-    configured and unsigned cursors are not explicitly allowed.
-
-    Returns the secret string when configured, or ``None`` when unsigned
-    mode is explicitly opted in via ``allow_unsigned=True`` or the
-    ``PAGINATION_CURSOR_ALLOW_INSECURE_DEV_SECRET`` env var.
+    ``allow_unsigned`` is retained for API compatibility and has no effect.
+    Cursor signing is always fail-closed when the configured secret is
+    missing or weak.
     """
-    secret = (os.environ.get("PAGINATION_CURSOR_SIGNING_SECRET") or "").strip()
-    if secret:
-        return secret
-    if allow_unsigned is None:
-        raw = (os.environ.get("PAGINATION_CURSOR_ALLOW_INSECURE_DEV_SECRET") or "").strip().lower()
-        allow_unsigned = raw in ("true", "1", "yes", "on")
-    if allow_unsigned:
-        return None
-    raise CursorSigningSecretMissing()
+    _ = allow_unsigned
+    return CursorSigningSecrets.from_env().require_valid_secret()
 
 
 def cursor_now_epoch_seconds(*, now_epoch_seconds: int | None = None) -> int:
