@@ -99,6 +99,8 @@ async def test_signing_secret_configured_present_on_success():
     assert "error" not in result
     meta = result.get("metadata", {})
     assert meta.get("pagination.cursor.signing_secret_configured") is True
+    assert meta.get("pagination.cursor.secret_configured") is True
+    assert meta.get("pagination.cursor.secret_valid") is True
 
 
 @pytest.mark.asyncio
@@ -266,6 +268,9 @@ async def test_keyset_decode_fails_closed_without_secret(monkeypatch):
     assert result["error"]["category"] == "invalid_request"
     meta = result.get("metadata", {})
     assert meta.get("pagination.cursor.signing_secret_configured") is False
+    assert meta.get("pagination.cursor.secret_configured") is False
+    assert meta.get("pagination.cursor.secret_valid") is False
+    assert meta.get("pagination.cursor.decode_reason_code") == PAGINATION_CURSOR_SECRET_MISSING
 
 
 @pytest.mark.asyncio
@@ -317,6 +322,65 @@ async def test_offset_decode_fails_closed_without_secret(monkeypatch):
     assert result["error"]["category"] == "invalid_request"
     meta = result.get("metadata", {})
     assert meta.get("pagination.cursor.signing_secret_configured") is False
+    assert meta.get("pagination.cursor.secret_configured") is False
+    assert meta.get("pagination.cursor.secret_valid") is False
+    assert meta.get("pagination.cursor.decode_reason_code") == PAGINATION_CURSOR_SECRET_MISSING
+
+
+@pytest.mark.asyncio
+async def test_secret_misconfig_counter_emitted_for_missing_decode(monkeypatch):
+    """Secret misconfiguration decode failures should emit bounded misconfig counter."""
+    monkeypatch.delenv("PAGINATION_CURSOR_SIGNING_SECRET", raising=False)
+    monkeypatch.delenv("PAGINATION_CURSOR_ALLOW_INSECURE_DEV_SECRET", raising=False)
+
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=10,
+        fingerprint="fp",
+        secret=_TEST_SECRET,
+        now_epoch_seconds=1000,
+        budget_snapshot=_BUDGET_SNAPSHOT,
+    )
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch(
+            "dal.database.Database.get_connection",
+            side_effect=lambda *_a, **_kw: _conn_ctx(_make_conn()),
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.mcp_metrics.add_counter") as add_counter,
+    ):
+        payload = await handler(
+            "SELECT id FROM users",
+            tenant_id=1,
+            pagination_mode="offset",
+            page_token=token,
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["details_safe"]["reason_code"] == PAGINATION_CURSOR_SECRET_MISSING
+    matching_calls = [
+        call
+        for call in add_counter.call_args_list
+        if call.args and call.args[0] == "pagination.cursor.secret_misconfig_total"
+    ]
+    assert matching_calls
+    attrs = matching_calls[-1].kwargs.get("attributes", {})
+    assert attrs.get("reason_code") == PAGINATION_CURSOR_SECRET_MISSING
 
 
 @pytest.mark.asyncio
@@ -427,6 +491,9 @@ async def test_keyset_decode_fails_closed_with_weak_secret(monkeypatch):
     assert result["error"]["category"] == "invalid_request"
     meta = result.get("metadata", {})
     assert meta.get("pagination.cursor.signing_secret_configured") is True
+    assert meta.get("pagination.cursor.secret_configured") is True
+    assert meta.get("pagination.cursor.secret_valid") is False
+    assert meta.get("pagination.cursor.decode_reason_code") == PAGINATION_CURSOR_SECRET_WEAK
     serialized = json.dumps(result)
     assert _WEAK_SECRET not in serialized
     assert cursor not in serialized
