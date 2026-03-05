@@ -10,6 +10,7 @@ import pytest
 from mcp_server.tools.execute_sql_query import handler
 
 _TEST_SECRET = "test-pagination-secret-for-unit-tests-2026"
+_TEST_SCOPE_FP = "abcdeffedcba0123"
 _BUDGET_SNAPSHOT = {
     "max_total_rows": 1000,
     "max_total_bytes": 1_000_000,
@@ -853,6 +854,10 @@ async def test_execute_sql_query_keyset_cursor_invalid_fingerprint():
             "mcp_server.tools.execute_sql_query.build_cursor_query_fingerprint",
             return_value="query-fp",
         ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
+        ),
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
@@ -870,6 +875,7 @@ async def test_execute_sql_query_keyset_cursor_invalid_fingerprint():
             ["id|asc|nulls_last"],
             "old-fingerprint",
             query_fp="query-fp",
+            scope_fp=_TEST_SCOPE_FP,
             secret=_TEST_SECRET,
             budget_snapshot=_BUDGET_SNAPSHOT,
         )
@@ -911,6 +917,10 @@ async def test_execute_sql_query_keyset_cursor_expired_reason_code_stable():
             "mcp_server.tools.execute_sql_query.build_query_fingerprint",
             return_value="ttl-fingerprint",
         ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
+        ),
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
@@ -930,6 +940,7 @@ async def test_execute_sql_query_keyset_cursor_expired_reason_code_stable():
             "ttl-fingerprint",
             issued_at=0,
             max_age_s=1,
+            scope_fp=_TEST_SCOPE_FP,
             secret=_TEST_SECRET,
             budget_snapshot=_BUDGET_SNAPSHOT,
         )
@@ -971,6 +982,10 @@ async def test_execute_sql_query_keyset_cursor_clock_skew_reason_code_stable():
             "mcp_server.tools.execute_sql_query.build_query_fingerprint",
             return_value="ttl-fingerprint",
         ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
+        ),
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
@@ -990,6 +1005,7 @@ async def test_execute_sql_query_keyset_cursor_clock_skew_reason_code_stable():
             "ttl-fingerprint",
             issued_at=4_000_000_000,
             max_age_s=3600,
+            scope_fp=_TEST_SCOPE_FP,
             secret=_TEST_SECRET,
             budget_snapshot=_BUDGET_SNAPSHOT,
         )
@@ -1036,6 +1052,10 @@ async def test_execute_sql_query_keyset_cursor_query_fp_mismatch_reason_code_sta
             "mcp_server.tools.execute_sql_query.build_cursor_query_fingerprint",
             return_value="expected-query-fp",
         ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
+        ),
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
@@ -1054,6 +1074,7 @@ async def test_execute_sql_query_keyset_cursor_query_fp_mismatch_reason_code_sta
             ["id|asc|nulls_last"],
             "stable-fingerprint",
             query_fp="different-query-fp",
+            scope_fp=_TEST_SCOPE_FP,
             secret=_TEST_SECRET,
             budget_snapshot=_BUDGET_SNAPSHOT,
         )
@@ -1350,6 +1371,10 @@ async def test_execute_sql_query_keyset_cursor_rejects_order_mismatch():
             "mcp_server.tools.execute_sql_query.build_cursor_query_fingerprint",
             return_value="query-fp",
         ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
+        ),
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
@@ -1366,6 +1391,7 @@ async def test_execute_sql_query_keyset_cursor_rejects_order_mismatch():
             ["id|asc|nulls_last"],
             "stable-fingerprint",
             query_fp="query-fp",
+            scope_fp=_TEST_SCOPE_FP,
             secret=_TEST_SECRET,
             budget_snapshot=_BUDGET_SNAPSHOT,
         )
@@ -3353,6 +3379,10 @@ async def test_execute_sql_query_keyset_rewrite_applied():
             "mcp_server.tools.execute_sql_query.build_cursor_query_fingerprint",
             return_value="query-fp",
         ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
+        ),
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
@@ -3376,6 +3406,7 @@ async def test_execute_sql_query_keyset_rewrite_applied():
             ["id|asc|nulls_last"],
             "test-fingerprint",
             query_fp="query-fp",
+            scope_fp=_TEST_SCOPE_FP,
             secret=_TEST_SECRET,
             budget_snapshot=_BUDGET_SNAPSHOT,
         )

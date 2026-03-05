@@ -366,6 +366,8 @@ class ExecuteSQLQueryMetadata(BaseModel):
             "SIGNATURE_INVALID",
             "SECRET_MISSING",
             "SECRET_WEAK",
+            "SCOPE_MISSING",
+            "SCOPE_MISMATCH",
         ]
     ] = Field(
         None,
@@ -388,6 +390,18 @@ class ExecuteSQLQueryMetadata(BaseModel):
         description="True when cursor signing secret is configured and meets policy checks",
         validation_alias="pagination.cursor.secret_valid",
         serialization_alias="pagination.cursor.secret_valid",
+    )
+    pagination_cursor_scope_bound: Optional[bool] = Field(
+        None,
+        description="True when cursor scope binding is enforced for decode/encode flow",
+        validation_alias="pagination.cursor.scope_bound",
+        serialization_alias="pagination.cursor.scope_bound",
+    )
+    pagination_cursor_scope_mismatch: Optional[bool] = Field(
+        None,
+        description="True when decoded cursor scope binding mismatches current request scope",
+        validation_alias="pagination.cursor.scope_mismatch",
+        serialization_alias="pagination.cursor.scope_mismatch",
     )
     pagination_cursor_decode_reason_code: Optional[str] = Field(
         None,

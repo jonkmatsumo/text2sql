@@ -22,6 +22,7 @@ from mcp_server.tools.execute_sql_query import handler as mcp_execute_sql_query_
 pytestmark = pytest.mark.pagination
 
 _TEST_SECRET = "test-pagination-secret-for-unit-tests-2026"
+_TEST_SCOPE_FP = "abcdeffedcba0123"
 _BUDGET_SNAPSHOT = {
     "max_total_rows": 1000,
     "max_total_bytes": 1_000_000,
@@ -372,6 +373,7 @@ async def test_cursor_query_mismatch_classification_parity_between_mcp_and_agent
         ["id|asc|nulls_last"],
         "stable-fingerprint",
         query_fp="cursor-query-fp",
+        scope_fp=_TEST_SCOPE_FP,
         secret=_TEST_SECRET,
         budget_snapshot=_BUDGET_SNAPSHOT,
     )
@@ -383,6 +385,10 @@ async def test_cursor_query_mismatch_classification_parity_between_mcp_and_agent
         patch(
             "mcp_server.tools.execute_sql_query.build_cursor_query_fingerprint",
             return_value="expected-query-fp",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
         ),
     ):
         mcp_result = await _invoke_mcp_federated_keyset(
@@ -403,6 +409,32 @@ async def test_cursor_query_mismatch_classification_parity_between_mcp_and_agent
         == mcp_result["error"]["details_safe"]["reason_code"]
     )
     assert agent_result["error_metadata"]["error_code"] == mcp_result["error"]["error_code"]
+
+
+@pytest.mark.asyncio
+async def test_cursor_scope_mismatch_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for cursor scope mismatches."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    page_one = await _invoke_mcp_federated_keyset(caps)
+    assert "error" not in page_one
+    cursor = page_one["metadata"]["next_keyset_cursor"]
+    assert cursor
+
+    with patch(
+        "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+        return_value="deadbeefdeadbeef",
+    ):
+        mcp_result = await _invoke_mcp_federated_keyset(caps, keyset_cursor=cursor)
+
+    await _assert_agent_reason_parity(mcp_result, "PAGINATION_CURSOR_SCOPE_MISMATCH")
 
 
 @pytest.mark.asyncio
