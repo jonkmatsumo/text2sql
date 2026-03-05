@@ -611,6 +611,62 @@ async def test_execute_sql_query_offset_pagination_rejects_expired_cursor_stable
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_offset_replay_guard_rejects_reused_cursor(monkeypatch):
+    """Replay guard enabled should reject second reuse of the same offset cursor."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}, {"id": 2}, {"id": 3}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    monkeypatch.setenv("PAGINATION_CURSOR_REPLAY_GUARD_ENABLED", "true")
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_args, **_kwargs: _conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        first_payload = await handler("SELECT 1 AS id", tenant_id=1, page_size=2)
+        first = json.loads(first_payload)
+        token = first["metadata"]["next_page_token"]
+        assert token
+
+        second_payload = await handler("SELECT 1 AS id", tenant_id=1, page_size=2, page_token=token)
+        second = json.loads(second_payload)
+        assert "error" not in second
+
+        third_payload = await handler("SELECT 1 AS id", tenant_id=1, page_size=2, page_token=token)
+
+    third = json.loads(third_payload)
+    assert third["error"]["category"] == "invalid_request"
+    assert third["error"]["error_code"] == "VALIDATION_ERROR"
+    assert third["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_REPLAY_DETECTED"
+    assert third["metadata"]["pagination.reject_reason_code"] == "PAGINATION_CURSOR_REPLAY_DETECTED"
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_offset_pagination_query_fp_mismatch_in_strict_mode(monkeypatch):
     """Offset cursor strict binding should reject mismatched query fingerprints."""
     caps = SimpleNamespace(

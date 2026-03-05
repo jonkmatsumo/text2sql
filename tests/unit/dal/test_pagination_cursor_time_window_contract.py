@@ -338,6 +338,86 @@ def test_keyset_decode_accepts_cursor_within_ttl_window():
     assert decoded == [5]
 
 
+def test_offset_decode_replay_guard_disabled_allows_cursor_reuse():
+    """Replay guard disabled should preserve cursor reuse behavior."""
+    token = encode_offset_pagination_token(
+        offset=5,
+        limit=10,
+        fingerprint="fp1",
+        issued_at=1_000,
+        max_age_s=300,
+    )
+    first = decode_offset_pagination_token(
+        token=token,
+        expected_fingerprint="fp1",
+        max_length=2048,
+        replay_guard_enabled=False,
+        now_epoch_seconds=1_050,
+    )
+    second = decode_offset_pagination_token(
+        token=token,
+        expected_fingerprint="fp1",
+        max_length=2048,
+        replay_guard_enabled=False,
+        now_epoch_seconds=1_051,
+    )
+    assert first.offset == 5
+    assert second.offset == 5
+
+
+def test_offset_decode_replay_guard_enabled_rejects_second_use():
+    """Replay guard enabled should reject second decode of the same offset cursor."""
+    token = encode_offset_pagination_token(
+        offset=5,
+        limit=10,
+        fingerprint="fp1",
+        issued_at=1_000,
+        max_age_s=300,
+    )
+    decode_offset_pagination_token(
+        token=token,
+        expected_fingerprint="fp1",
+        max_length=2048,
+        replay_guard_enabled=True,
+        now_epoch_seconds=1_050,
+    )
+    with pytest.raises(OffsetPaginationTokenError) as exc_info:
+        decode_offset_pagination_token(
+            token=token,
+            expected_fingerprint="fp1",
+            max_length=2048,
+            replay_guard_enabled=True,
+            now_epoch_seconds=1_051,
+        )
+    assert exc_info.value.reason_code == "PAGINATION_CURSOR_REPLAY_DETECTED"
+
+
+def test_keyset_decode_replay_guard_enabled_rejects_second_use():
+    """Replay guard enabled should reject second decode of the same keyset cursor."""
+    cursor = encode_keyset_cursor(
+        [5],
+        ["id|asc|nulls_last"],
+        "fp1",
+        issued_at=1_000,
+        max_age_s=300,
+    )
+    decode_keyset_cursor(
+        cursor,
+        expected_fingerprint="fp1",
+        expected_keys=["id|asc|nulls_last"],
+        replay_guard_enabled=True,
+        now_epoch_seconds=1_050,
+    )
+    with pytest.raises(ValueError, match="PAGINATION_CURSOR_REPLAY_DETECTED"):
+        decode_keyset_cursor(
+            cursor,
+            expected_fingerprint="fp1",
+            expected_keys=["id|asc|nulls_last"],
+            replay_guard_enabled=True,
+            now_epoch_seconds=1_051,
+        )
+
+
 def test_offset_decode_rejects_query_fingerprint_mismatch_in_strict_mode():
     """Offset cursor should reject strict query fingerprint mismatches."""
     token = encode_offset_pagination_token(

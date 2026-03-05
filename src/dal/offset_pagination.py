@@ -16,19 +16,24 @@ from dal.execution_budget import (
     budget_snapshot_fingerprint,
 )
 from dal.pagination_cursor import (
+    DEFAULT_CURSOR_REPLAY_CACHE_MAX_ENTRIES,
     DEFAULT_CURSOR_TTL_MS,
     PAGINATION_CURSOR_CLOCK_SKEW,
     PAGINATION_CURSOR_EXPIRED,
+    PAGINATION_CURSOR_REPLAY_DETECTED,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SIGNATURE_INVALID,
     PAGINATION_CURSOR_TTL_INVALID,
     PAGINATION_CURSOR_TTL_MISSING,
     bounded_cursor_age_seconds,
+    build_cursor_nonce,
     cursor_now_epoch_milliseconds,
     normalize_cursor_milliseconds,
+    normalize_cursor_nonce,
     normalize_cursor_scope_fingerprint,
     normalize_optional_int,
+    register_cursor_nonce_once,
 )
 
 PAGINATION_CURSOR_QUERY_MISMATCH = "PAGINATION_CURSOR_QUERY_MISMATCH"
@@ -55,6 +60,7 @@ class OffsetPaginationToken:
     issued_at: int | None = None
     max_age_s: int | None = None
     legacy_issued_at_accepted: bool = False
+    nonce: str | None = None
     query_fingerprint: str | None = None
     budget_snapshot: dict[str, Any] | None = None
 
@@ -120,6 +126,7 @@ def encode_offset_pagination_token(
     secret: str | None = None,
     issued_at_ms: int | None = None,
     ttl_ms: int | None = None,
+    nonce: str | None = None,
     issued_at: int | None = None,
     max_age_s: int | None = None,
     now_epoch_milliseconds: int | None = None,
@@ -162,6 +169,8 @@ def encode_offset_pagination_token(
         "issued_at": int(normalized_issued_at_ms) // 1000,
         "max_age_s": max(1, int(normalized_ttl_ms) // 1000),
     }
+    normalized_nonce = normalize_cursor_nonce(nonce) or build_cursor_nonce()
+    payload["nonce"] = normalized_nonce
     normalized_query_fp = str(query_fp).strip() if isinstance(query_fp, str) else ""
     if normalized_query_fp:
         payload["query_fp"] = normalized_query_fp
@@ -197,6 +206,8 @@ def decode_offset_pagination_token(
     max_age_seconds: int | None = 3600,
     clock_skew_seconds: int = 300,
     clock_skew_ms: int | None = None,
+    replay_guard_enabled: bool = False,
+    replay_cache_max_entries: int = DEFAULT_CURSOR_REPLAY_CACHE_MAX_ENTRIES,
     now_epoch_seconds: int | None = None,
     now_epoch_milliseconds: int | None = None,
     expected_query_fp: str | None = None,
@@ -283,6 +294,7 @@ def decode_offset_pagination_token(
         decode_metadata["issued_at_present"] = issued_at_ms_payload is not None
         decode_metadata["scope_bound"] = False
         decode_metadata["scope_mismatch"] = False
+        decode_metadata["replay_guard_enabled"] = bool(replay_guard_enabled)
     if issued_at_ms_payload is None or ttl_ms_payload is None:
         if isinstance(decode_metadata, dict):
             decode_metadata["validation_outcome"] = "INVALID"
@@ -386,6 +398,30 @@ def decode_offset_pagination_token(
             reason_code="execution_pagination_page_token_fingerprint_mismatch",
             message="Pagination token does not match the current query.",
         )
+    nonce = normalize_cursor_nonce(payload.get("nonce"))
+    if replay_guard_enabled:
+        if nonce is None:
+            if isinstance(decode_metadata, dict):
+                decode_metadata["replay_detected"] = True
+                decode_metadata["validation_outcome"] = "REPLAY"
+            raise OffsetPaginationTokenError(
+                reason_code=PAGINATION_CURSOR_REPLAY_DETECTED,
+                message="Pagination token replay rejected.",
+            )
+        replay_cache_result = register_cursor_nonce_once(
+            nonce=nonce,
+            now_ms=now_ms,
+            ttl_ms=ttl_ms_value,
+            max_entries=replay_cache_max_entries,
+        )
+        if replay_cache_result is False:
+            if isinstance(decode_metadata, dict):
+                decode_metadata["replay_detected"] = True
+                decode_metadata["validation_outcome"] = "REPLAY"
+            raise OffsetPaginationTokenError(
+                reason_code=PAGINATION_CURSOR_REPLAY_DETECTED,
+                message="Pagination token replay rejected.",
+            )
 
     return OffsetPaginationToken(
         offset=offset,
@@ -396,6 +432,7 @@ def decode_offset_pagination_token(
         issued_at=issued_at_ms // 1000,
         max_age_s=ttl_ms_value // 1000,
         legacy_issued_at_accepted=False,
+        nonce=nonce,
         query_fingerprint=query_fingerprint,
         budget_snapshot=normalized_budget_snapshot,
     )

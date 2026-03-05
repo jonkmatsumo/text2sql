@@ -368,6 +368,7 @@ class ExecuteSQLQueryMetadata(BaseModel):
             "SECRET_WEAK",
             "SCOPE_MISSING",
             "SCOPE_MISMATCH",
+            "REPLAY",
         ]
     ] = Field(
         None,

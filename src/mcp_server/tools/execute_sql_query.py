@@ -56,11 +56,13 @@ from dal.offset_pagination import (
 )
 from dal.pagination_cursor import (
     DEFAULT_CURSOR_CLOCK_SKEW_MS,
+    DEFAULT_CURSOR_REPLAY_CACHE_MAX_ENTRIES,
     DEFAULT_CURSOR_TTL_MS,
     MAX_CURSOR_CLOCK_SKEW_MS,
     MAX_CURSOR_TTL_MS,
     PAGINATION_CURSOR_CLOCK_SKEW,
     PAGINATION_CURSOR_EXPIRED,
+    PAGINATION_CURSOR_REPLAY_DETECTED,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SECRET_MISSING,
@@ -162,6 +164,7 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     PAGINATION_CURSOR_TTL_MISSING,
     PAGINATION_CURSOR_TTL_INVALID,
     PAGINATION_CURSOR_CLOCK_SKEW,
+    PAGINATION_CURSOR_REPLAY_DETECTED,
     "PAGINATION_CURSOR_QUERY_MISMATCH",
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
@@ -216,6 +219,7 @@ _CURSOR_VALIDATION_OUTCOME_ALLOWLIST = {
     "SECRET_WEAK",
     "SCOPE_MISSING",
     "SCOPE_MISMATCH",
+    "REPLAY",
 }
 _CURSOR_AGE_BUCKET_ALLOWLIST = {
     "0_59",
@@ -240,6 +244,7 @@ _CURSOR_DECODE_REASON_CODE_ALLOWLIST = {
     PAGINATION_CURSOR_TTL_MISSING,
     PAGINATION_CURSOR_TTL_INVALID,
     PAGINATION_CURSOR_CLOCK_SKEW,
+    PAGINATION_CURSOR_REPLAY_DETECTED,
     "PAGINATION_CURSOR_QUERY_MISMATCH",
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
@@ -787,6 +792,7 @@ def _cursor_validation_outcome_from_reason_code(reason_code: Any) -> str | None:
         PAGINATION_CURSOR_TTL_MISSING: "INVALID",
         PAGINATION_CURSOR_TTL_INVALID: "INVALID",
         "PAGINATION_CURSOR_ISSUED_AT_INVALID": "INVALID",
+        PAGINATION_CURSOR_REPLAY_DETECTED: "REPLAY",
         "PAGINATION_CURSOR_QUERY_MISMATCH": "QUERY_MISMATCH",
         "PAGINATION_CURSOR_SCOPE_MISSING": "SCOPE_MISSING",
         "PAGINATION_CURSOR_SCOPE_MISMATCH": "SCOPE_MISMATCH",
@@ -848,6 +854,8 @@ def _apply_cursor_decode_metadata(
         "PAGINATION_CURSOR_ISSUED_AT_INVALID",
     }:
         envelope_metadata.setdefault("cursor_issued_at_present", False)
+    if fallback_reason_code == PAGINATION_CURSOR_REPLAY_DETECTED:
+        envelope_metadata["pagination.cursor.replay_detected"] = True
     if fallback_reason_code == PAGINATION_CURSOR_SCOPE_MISSING:
         envelope_metadata["pagination.cursor.scope_bound"] = True
         envelope_metadata.setdefault("pagination.cursor.scope_mismatch", False)
@@ -3068,6 +3076,20 @@ async def handler(
     cursor_bind_query_fingerprint = get_env_bool(
         "PAGINATION_CURSOR_BIND_QUERY_FINGERPRINT", pagination_mode == "keyset"
     )
+    cursor_replay_guard_enabled = get_env_bool("PAGINATION_CURSOR_REPLAY_GUARD_ENABLED", False)
+    cursor_replay_cache_max_entries = min(
+        max(
+            1,
+            int(
+                get_env_int(
+                    "PAGINATION_CURSOR_REPLAY_CACHE_MAX_ENTRIES",
+                    DEFAULT_CURSOR_REPLAY_CACHE_MAX_ENTRIES,
+                )
+                or DEFAULT_CURSOR_REPLAY_CACHE_MAX_ENTRIES
+            ),
+        ),
+        100_000,
+    )
     max_offset_pages = max(
         1,
         int(
@@ -3090,6 +3112,9 @@ async def handler(
     tenant_enforcement_metadata["pagination.cursor.secret_valid"] = cursor_signing_secrets.valid
     tenant_enforcement_metadata["pagination.cursor.scope_bound"] = False
     tenant_enforcement_metadata["pagination.cursor.scope_mismatch"] = False
+    tenant_enforcement_metadata["pagination.cursor.replay_guard_enabled"] = bool(
+        cursor_replay_guard_enabled
+    )
     if page_token is not None:
         normalized_page_token = page_token.strip()
         if not normalized_page_token:
@@ -3409,6 +3434,8 @@ async def handler(
                             expected_cursor_context=expected_cursor_context or None,
                             decode_metadata=keyset_decode_metadata,
                             clock_skew_ms=cursor_clock_skew_ms,
+                            replay_guard_enabled=cursor_replay_guard_enabled,
+                            replay_cache_max_entries=cursor_replay_cache_max_entries,
                             expected_query_fp=(
                                 cursor_query_fingerprint if cursor_bind_query_fingerprint else None
                             ),
@@ -3455,6 +3482,8 @@ async def handler(
                             reason_code = PAGINATION_CURSOR_TTL_INVALID
                         elif PAGINATION_CURSOR_CLOCK_SKEW in str(e):
                             reason_code = PAGINATION_CURSOR_CLOCK_SKEW
+                        elif PAGINATION_CURSOR_REPLAY_DETECTED in str(e):
+                            reason_code = PAGINATION_CURSOR_REPLAY_DETECTED
                         elif "PAGINATION_CURSOR_QUERY_MISMATCH" in str(e):
                             reason_code = "PAGINATION_CURSOR_QUERY_MISMATCH"
                         elif PAGINATION_CURSOR_SCOPE_MISSING in str(e):
@@ -3631,6 +3660,8 @@ async def handler(
                             secret=pagination_token_secret or None,
                             decode_metadata=offset_decode_metadata,
                             clock_skew_ms=cursor_clock_skew_ms,
+                            replay_guard_enabled=cursor_replay_guard_enabled,
+                            replay_cache_max_entries=cursor_replay_cache_max_entries,
                             expected_query_fp=(
                                 cursor_query_fingerprint if cursor_bind_query_fingerprint else None
                             ),
