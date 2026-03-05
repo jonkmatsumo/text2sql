@@ -1308,8 +1308,8 @@ async def test_execute_sql_query_keyset_follow_up_expired_cursor_sanitized():
             base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
         )
         cursor_payload.pop("s", None)
-        cursor_payload["issued_at"] = 0
-        cursor_payload["max_age_s"] = 1
+        cursor_payload["issued_at_ms"] = 0
+        cursor_payload["ttl_ms"] = 1_000
         # Re-sign after tampering
         sig_data = json.dumps(cursor_payload, sort_keys=True)
         cursor_payload["s"] = hmac.new(

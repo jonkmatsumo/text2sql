@@ -151,6 +151,8 @@ def _reason_code_from_agent_error_metadata(error_metadata: dict) -> str | None:
 def _tamper_keyset_cursor(
     cursor: str,
     *,
+    issued_at_ms: int | None = None,
+    ttl_ms: int | None = None,
     issued_at: int | None = None,
     max_age_s: int | None = None,
     secret: str = _TEST_SECRET,
@@ -162,6 +164,10 @@ def _tamper_keyset_cursor(
     padded = cursor + "=" * (-len(cursor) % 4)
     payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
     payload.pop("s", None)
+    if issued_at_ms is not None:
+        payload["issued_at_ms"] = issued_at_ms
+    if ttl_ms is not None:
+        payload["ttl_ms"] = ttl_ms
     if issued_at is not None:
         payload["issued_at"] = issued_at
     if max_age_s is not None:
@@ -343,7 +349,7 @@ async def test_cursor_expired_classification_parity_between_mcp_and_agent():
     cursor = page_one["metadata"]["next_keyset_cursor"]
     assert cursor
 
-    expired_cursor = _tamper_keyset_cursor(cursor, issued_at=0, max_age_s=1)
+    expired_cursor = _tamper_keyset_cursor(cursor, issued_at_ms=0, ttl_ms=1_000)
     page_two = await _invoke_mcp_federated_keyset(caps, keyset_cursor=expired_cursor)
     assert page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_EXPIRED"
 

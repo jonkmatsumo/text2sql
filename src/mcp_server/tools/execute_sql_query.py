@@ -55,10 +55,18 @@ from dal.offset_pagination import (
     encode_offset_pagination_token,
 )
 from dal.pagination_cursor import (
+    DEFAULT_CURSOR_CLOCK_SKEW_MS,
+    DEFAULT_CURSOR_TTL_MS,
+    MAX_CURSOR_CLOCK_SKEW_MS,
+    MAX_CURSOR_TTL_MS,
+    PAGINATION_CURSOR_CLOCK_SKEW,
+    PAGINATION_CURSOR_EXPIRED,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
+    PAGINATION_CURSOR_TTL_INVALID,
+    PAGINATION_CURSOR_TTL_MISSING,
     CursorSigningSecrets,
     build_cursor_scope_fingerprint,
 )
@@ -150,9 +158,10 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "PAGINATION_FEDERATED_ORDERING_UNSAFE",
     "PAGINATION_FEDERATED_UNSUPPORTED",
     "PAGINATION_BACKEND_SET_CHANGED",
-    "PAGINATION_CURSOR_EXPIRED",
-    "PAGINATION_CURSOR_ISSUED_AT_INVALID",
-    "PAGINATION_CURSOR_CLOCK_SKEW",
+    PAGINATION_CURSOR_EXPIRED,
+    PAGINATION_CURSOR_TTL_MISSING,
+    PAGINATION_CURSOR_TTL_INVALID,
+    PAGINATION_CURSOR_CLOCK_SKEW,
     "PAGINATION_CURSOR_QUERY_MISMATCH",
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
@@ -202,7 +211,6 @@ _CURSOR_VALIDATION_OUTCOME_ALLOWLIST = {
     "SKEW",
     "INVALID",
     "QUERY_MISMATCH",
-    "LEGACY_ACCEPTED",
     "SIGNATURE_INVALID",
     "SECRET_MISSING",
     "SECRET_WEAK",
@@ -228,9 +236,10 @@ _CURSOR_DECODE_REASON_CODE_ALLOWLIST = {
     "KEYSET_SHARD_MISMATCH",
     "KEYSET_PARTITION_SET_CHANGED",
     "PAGINATION_BACKEND_SET_CHANGED",
-    "PAGINATION_CURSOR_EXPIRED",
-    "PAGINATION_CURSOR_ISSUED_AT_INVALID",
-    "PAGINATION_CURSOR_CLOCK_SKEW",
+    PAGINATION_CURSOR_EXPIRED,
+    PAGINATION_CURSOR_TTL_MISSING,
+    PAGINATION_CURSOR_TTL_INVALID,
+    PAGINATION_CURSOR_CLOCK_SKEW,
     "PAGINATION_CURSOR_QUERY_MISMATCH",
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
@@ -773,8 +782,10 @@ def _cursor_validation_outcome_from_reason_code(reason_code: Any) -> str | None:
         return None
     reason = reason_code.strip()
     mapping = {
-        "PAGINATION_CURSOR_EXPIRED": "EXPIRED",
-        "PAGINATION_CURSOR_CLOCK_SKEW": "SKEW",
+        PAGINATION_CURSOR_EXPIRED: "EXPIRED",
+        PAGINATION_CURSOR_CLOCK_SKEW: "SKEW",
+        PAGINATION_CURSOR_TTL_MISSING: "INVALID",
+        PAGINATION_CURSOR_TTL_INVALID: "INVALID",
         "PAGINATION_CURSOR_ISSUED_AT_INVALID": "INVALID",
         "PAGINATION_CURSOR_QUERY_MISMATCH": "QUERY_MISMATCH",
         "PAGINATION_CURSOR_SCOPE_MISSING": "SCOPE_MISSING",
@@ -827,11 +838,15 @@ def _apply_cursor_decode_metadata(
     bounded_decode_reason_code = _bounded_cursor_decode_reason_code(fallback_reason_code)
     if bounded_decode_reason_code is not None:
         envelope_metadata["pagination.cursor.decode_reason_code"] = bounded_decode_reason_code
-    if fallback_reason_code == "PAGINATION_CURSOR_EXPIRED":
+    if fallback_reason_code == PAGINATION_CURSOR_EXPIRED:
         envelope_metadata["pagination.cursor.expired"] = True
-    if fallback_reason_code == "PAGINATION_CURSOR_CLOCK_SKEW":
+    if fallback_reason_code == PAGINATION_CURSOR_CLOCK_SKEW:
         envelope_metadata["pagination.cursor.skew_detected"] = True
-    if fallback_reason_code == "PAGINATION_CURSOR_ISSUED_AT_INVALID":
+    if fallback_reason_code in {
+        PAGINATION_CURSOR_TTL_MISSING,
+        PAGINATION_CURSOR_TTL_INVALID,
+        "PAGINATION_CURSOR_ISSUED_AT_INVALID",
+    }:
         envelope_metadata.setdefault("cursor_issued_at_present", False)
     if fallback_reason_code == PAGINATION_CURSOR_SCOPE_MISSING:
         envelope_metadata["pagination.cursor.scope_bound"] = True
@@ -3022,13 +3037,34 @@ async def handler(
     max_page_token_len = get_env_int(
         "EXECUTION_PAGINATION_TOKEN_MAX_LENGTH", _DEFAULT_PAGE_TOKEN_MAX_LENGTH
     )
-    cursor_max_age_seconds = max(
-        1, int(get_env_int("PAGINATION_CURSOR_MAX_AGE_SECONDS", 3600) or 3600)
-    )
-    cursor_clock_skew_seconds = max(
-        0, int(get_env_int("PAGINATION_CURSOR_CLOCK_SKEW_SECONDS", 300) or 300)
-    )
-    cursor_require_issued_at = get_env_bool("PAGINATION_CURSOR_REQUIRE_ISSUED_AT", True)
+    cursor_ttl_ms_raw = (get_env_str("PAGINATION_CURSOR_TTL_MS", "") or "").strip()
+    if cursor_ttl_ms_raw:
+        cursor_ttl_ms = int(get_env_int("PAGINATION_CURSOR_TTL_MS", DEFAULT_CURSOR_TTL_MS))
+    else:
+        # Legacy compatibility fallback while callers migrate to *_MS env vars.
+        legacy_max_age_seconds = max(
+            1, int(get_env_int("PAGINATION_CURSOR_MAX_AGE_SECONDS", 3600) or 3600)
+        )
+        cursor_ttl_ms = legacy_max_age_seconds * 1000
+    cursor_ttl_ms = min(max(1_000, cursor_ttl_ms), MAX_CURSOR_TTL_MS)
+
+    cursor_clock_skew_ms_raw = (get_env_str("PAGINATION_CURSOR_CLOCK_SKEW_MS", "") or "").strip()
+    if cursor_clock_skew_ms_raw:
+        cursor_clock_skew_ms = int(
+            get_env_int("PAGINATION_CURSOR_CLOCK_SKEW_MS", DEFAULT_CURSOR_CLOCK_SKEW_MS)
+        )
+    else:
+        # Legacy compatibility fallback while callers migrate to *_MS env vars.
+        legacy_clock_skew_seconds = max(
+            0,
+            int(
+                get_env_int("PAGINATION_CURSOR_CLOCK_SKEW_SECONDS", 300)
+                or (DEFAULT_CURSOR_CLOCK_SKEW_MS // 1000)
+            ),
+        )
+        cursor_clock_skew_ms = legacy_clock_skew_seconds * 1000
+    cursor_clock_skew_ms = min(max(0, cursor_clock_skew_ms), MAX_CURSOR_CLOCK_SKEW_MS)
+
     cursor_bind_query_fingerprint = get_env_bool(
         "PAGINATION_CURSOR_BIND_QUERY_FINGERPRINT", pagination_mode == "keyset"
     )
@@ -3371,10 +3407,8 @@ async def handler(
                             secret=pagination_token_secret,
                             expected_keys=keyset_order_signature,
                             expected_cursor_context=expected_cursor_context or None,
-                            require_issued_at=cursor_require_issued_at,
                             decode_metadata=keyset_decode_metadata,
-                            max_age_seconds=cursor_max_age_seconds,
-                            clock_skew_seconds=cursor_clock_skew_seconds,
+                            clock_skew_ms=cursor_clock_skew_ms,
                             expected_query_fp=(
                                 cursor_query_fingerprint if cursor_bind_query_fingerprint else None
                             ),
@@ -3410,12 +3444,17 @@ async def handler(
                         elif PAGINATION_BACKEND_SET_CHANGED in str(e):
                             reason_code = PAGINATION_BACKEND_SET_CHANGED
                             tenant_enforcement_metadata["pagination.backend_set_mismatch"] = True
-                        elif "PAGINATION_CURSOR_EXPIRED" in str(e):
-                            reason_code = "PAGINATION_CURSOR_EXPIRED"
+                        elif PAGINATION_CURSOR_EXPIRED in str(e):
+                            reason_code = PAGINATION_CURSOR_EXPIRED
+                        elif PAGINATION_CURSOR_TTL_MISSING in str(e):
+                            reason_code = PAGINATION_CURSOR_TTL_MISSING
+                        elif PAGINATION_CURSOR_TTL_INVALID in str(e):
+                            reason_code = PAGINATION_CURSOR_TTL_INVALID
                         elif "PAGINATION_CURSOR_ISSUED_AT_INVALID" in str(e):
-                            reason_code = "PAGINATION_CURSOR_ISSUED_AT_INVALID"
-                        elif "PAGINATION_CURSOR_CLOCK_SKEW" in str(e):
-                            reason_code = "PAGINATION_CURSOR_CLOCK_SKEW"
+                            # Legacy compatibility for older cursor payloads.
+                            reason_code = PAGINATION_CURSOR_TTL_INVALID
+                        elif PAGINATION_CURSOR_CLOCK_SKEW in str(e):
+                            reason_code = PAGINATION_CURSOR_CLOCK_SKEW
                         elif "PAGINATION_CURSOR_QUERY_MISMATCH" in str(e):
                             reason_code = "PAGINATION_CURSOR_QUERY_MISMATCH"
                         elif PAGINATION_CURSOR_SCOPE_MISSING in str(e):
@@ -3590,10 +3629,8 @@ async def handler(
                             expected_fingerprint=query_fingerprint,
                             max_length=max_page_token_len,
                             secret=pagination_token_secret or None,
-                            require_issued_at=cursor_require_issued_at,
                             decode_metadata=offset_decode_metadata,
-                            max_age_seconds=cursor_max_age_seconds,
-                            clock_skew_seconds=cursor_clock_skew_seconds,
+                            clock_skew_ms=cursor_clock_skew_ms,
                             expected_query_fp=(
                                 cursor_query_fingerprint if cursor_bind_query_fingerprint else None
                             ),
@@ -3849,7 +3886,7 @@ async def handler(
                 limit=int(offset_next_token_payload["limit"]),
                 fingerprint=query_fingerprint or "",
                 secret=pagination_token_secret or None,
-                max_age_s=cursor_max_age_seconds,
+                ttl_ms=cursor_ttl_ms,
                 query_fp=(cursor_query_fingerprint if cursor_bind_query_fingerprint else None),
                 scope_fp=cursor_scope_fingerprint,
                 budget_snapshot=execution_budget.to_snapshot(),
@@ -3929,7 +3966,7 @@ async def handler(
                     query_fingerprint,
                     secret=pagination_token_secret,
                     cursor_context=keyset_cursor_context or None,
-                    max_age_s=cursor_max_age_seconds,
+                    ttl_ms=cursor_ttl_ms,
                     query_fp=(cursor_query_fingerprint if cursor_bind_query_fingerprint else None),
                     scope_fp=cursor_scope_fingerprint,
                     budget_snapshot=execution_budget.to_snapshot(),

@@ -825,8 +825,8 @@ async def test_execute_sql_query_offset_follow_up_expired_cursor_sanitized():
 
         padded = token + "=" * (-len(token) % 4)
         token_wrapper = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
-        token_wrapper["p"]["issued_at"] = 0
-        token_wrapper["p"]["max_age_s"] = 1
+        token_wrapper["p"]["issued_at_ms"] = 0
+        token_wrapper["p"]["ttl_ms"] = 1_000
         # Re-sign inner payload after tampering
         inner_bytes = json.dumps(token_wrapper["p"], separators=(",", ":"), sort_keys=True).encode(
             "utf-8"
