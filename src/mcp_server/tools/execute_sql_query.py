@@ -582,22 +582,29 @@ def _bounded_cursor_decode_reason_code(raw_reason_code: Any) -> str | None:
 
 def _cursor_secret_observability_fields(
     metadata: dict[str, Any] | None,
-) -> tuple[bool, bool, bool, bool, str | None]:
+) -> tuple[bool, bool, bool, bool, bool, bool, bool | None, str | None]:
     cursor_metadata = metadata if isinstance(metadata, dict) else {}
     secret_configured = cursor_metadata.get("pagination.cursor.secret_configured")
     if secret_configured is None:
         secret_configured = cursor_metadata.get("pagination.cursor.signing_secret_configured")
     secret_valid = cursor_metadata.get("pagination.cursor.secret_valid")
+    ttl_enabled = bool(cursor_metadata.get("pagination.cursor.ttl_enabled"))
+    replay_guard_enabled = bool(cursor_metadata.get("pagination.cursor.replay_guard_enabled"))
     scope_bound = bool(cursor_metadata.get("pagination.cursor.scope_bound"))
     scope_mismatch = bool(cursor_metadata.get("pagination.cursor.scope_mismatch"))
+    expired_raw = cursor_metadata.get("pagination.cursor.expired")
+    expired = bool(expired_raw) if expired_raw is not None else None
     decode_reason_code = _bounded_cursor_decode_reason_code(
         cursor_metadata.get("pagination.cursor.decode_reason_code")
     )
     return (
         bool(secret_configured),
         bool(secret_valid),
+        ttl_enabled,
+        replay_guard_enabled,
         scope_bound,
         scope_mismatch,
+        expired,
         decode_reason_code,
     )
 
@@ -606,18 +613,42 @@ def _record_cursor_secret_observability(metadata: dict[str, Any] | None) -> None
     (
         secret_configured,
         secret_valid,
+        ttl_enabled,
+        replay_guard_enabled,
         scope_bound,
         scope_mismatch,
+        expired,
         decode_reason_code,
     ) = _cursor_secret_observability_fields(metadata)
     span = trace.get_current_span()
     if span is not None and span.is_recording():
         span.set_attribute("pagination.cursor.secret_configured", secret_configured)
         span.set_attribute("pagination.cursor.secret_valid", secret_valid)
+        span.set_attribute("pagination.cursor.ttl_enabled", ttl_enabled)
+        span.set_attribute("pagination.cursor.replay_guard_enabled", replay_guard_enabled)
         span.set_attribute("pagination.cursor.scope_bound", scope_bound)
         span.set_attribute("pagination.cursor.scope_mismatch", scope_mismatch)
+        if expired is not None:
+            span.set_attribute("pagination.cursor.expired", expired)
         if decode_reason_code is not None:
             span.set_attribute("pagination.cursor.decode_reason_code", decode_reason_code)
+    if decode_reason_code is not None:
+        mcp_metrics.add_counter(
+            "pagination.cursor.decode_failures_total",
+            description="Count of pagination cursor decode failures by reason code",
+            attributes={
+                "tool_name": TOOL_NAME,
+                "reason_code": decode_reason_code,
+            },
+        )
+    if decode_reason_code == PAGINATION_CURSOR_REPLAY_DETECTED:
+        mcp_metrics.add_counter(
+            "pagination.cursor.replay_rejections_total",
+            description="Count of pagination cursor replay-guard rejections",
+            attributes={
+                "tool_name": TOOL_NAME,
+            },
+        )
     if decode_reason_code in _CURSOR_SECRET_MISCONFIG_REASON_ALLOWLIST:
         mcp_metrics.add_counter(
             "pagination.cursor.secret_misconfig_total",
@@ -835,6 +866,14 @@ def _apply_cursor_decode_metadata(
         envelope_metadata["pagination.cursor.scope_bound"] = bool(metadata.get("scope_bound"))
     if "scope_mismatch" in metadata:
         envelope_metadata["pagination.cursor.scope_mismatch"] = bool(metadata.get("scope_mismatch"))
+    if "replay_guard_enabled" in metadata:
+        envelope_metadata["pagination.cursor.replay_guard_enabled"] = bool(
+            metadata.get("replay_guard_enabled")
+        )
+    if "replay_detected" in metadata:
+        envelope_metadata["pagination.cursor.replay_detected"] = bool(
+            metadata.get("replay_detected")
+        )
     validation_outcome = _normalize_cursor_validation_outcome(metadata.get("validation_outcome"))
     if validation_outcome is None:
         validation_outcome = _cursor_validation_outcome_from_reason_code(fallback_reason_code)
@@ -3110,6 +3149,7 @@ async def handler(
         cursor_signing_secrets.configured
     )
     tenant_enforcement_metadata["pagination.cursor.secret_valid"] = cursor_signing_secrets.valid
+    tenant_enforcement_metadata["pagination.cursor.ttl_enabled"] = bool(cursor_ttl_ms > 0)
     tenant_enforcement_metadata["pagination.cursor.scope_bound"] = False
     tenant_enforcement_metadata["pagination.cursor.scope_mismatch"] = False
     tenant_enforcement_metadata["pagination.cursor.replay_guard_enabled"] = bool(
@@ -4236,11 +4276,20 @@ async def handler(
                 "pagination.cursor.secret_valid": tenant_enforcement_metadata.get(
                     "pagination.cursor.secret_valid"
                 ),
+                "pagination.cursor.ttl_enabled": tenant_enforcement_metadata.get(
+                    "pagination.cursor.ttl_enabled"
+                ),
                 "pagination.cursor.scope_bound": tenant_enforcement_metadata.get(
                     "pagination.cursor.scope_bound"
                 ),
                 "pagination.cursor.scope_mismatch": tenant_enforcement_metadata.get(
                     "pagination.cursor.scope_mismatch"
+                ),
+                "pagination.cursor.expired": tenant_enforcement_metadata.get(
+                    "pagination.cursor.expired"
+                ),
+                "pagination.cursor.replay_guard_enabled": tenant_enforcement_metadata.get(
+                    "pagination.cursor.replay_guard_enabled"
                 ),
                 "pagination.cursor.decode_reason_code": tenant_enforcement_metadata.get(
                     "pagination.cursor.decode_reason_code"

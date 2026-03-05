@@ -392,6 +392,12 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.cursor.secret_valid",
         serialization_alias="pagination.cursor.secret_valid",
     )
+    pagination_cursor_ttl_enabled: Optional[bool] = Field(
+        None,
+        description="True when cursor ttl/expiry validation is enabled for decode flow",
+        validation_alias="pagination.cursor.ttl_enabled",
+        serialization_alias="pagination.cursor.ttl_enabled",
+    )
     pagination_cursor_scope_bound: Optional[bool] = Field(
         None,
         description="True when cursor scope binding is enforced for decode/encode flow",
@@ -403,6 +409,18 @@ class ExecuteSQLQueryMetadata(BaseModel):
         description="True when decoded cursor scope binding mismatches current request scope",
         validation_alias="pagination.cursor.scope_mismatch",
         serialization_alias="pagination.cursor.scope_mismatch",
+    )
+    pagination_cursor_expired: Optional[bool] = Field(
+        None,
+        description="True when cursor decode failed due ttl expiry",
+        validation_alias="pagination.cursor.expired",
+        serialization_alias="pagination.cursor.expired",
+    )
+    pagination_cursor_replay_guard_enabled: Optional[bool] = Field(
+        None,
+        description="True when cursor replay guard is enabled for decode flow",
+        validation_alias="pagination.cursor.replay_guard_enabled",
+        serialization_alias="pagination.cursor.replay_guard_enabled",
     )
     pagination_cursor_decode_reason_code: Optional[str] = Field(
         None,

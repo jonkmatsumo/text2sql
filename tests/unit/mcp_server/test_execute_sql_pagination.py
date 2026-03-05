@@ -608,6 +608,8 @@ async def test_execute_sql_query_offset_pagination_rejects_expired_cursor_stable
     assert result["error"]["error_code"] == "VALIDATION_ERROR"
     assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_EXPIRED"
     assert result["metadata"]["pagination.reject_reason_code"] == "PAGINATION_CURSOR_EXPIRED"
+    assert result["metadata"]["pagination.cursor.expired"] is True
+    assert result["metadata"]["pagination.cursor.decode_reason_code"] == "PAGINATION_CURSOR_EXPIRED"
 
 
 @pytest.mark.asyncio
@@ -632,6 +634,8 @@ async def test_execute_sql_query_offset_replay_guard_rejects_reused_cursor(monke
         yield _Conn()
 
     monkeypatch.setenv("PAGINATION_CURSOR_REPLAY_GUARD_ENABLED", "true")
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
 
     with (
         patch(
@@ -647,6 +651,8 @@ async def test_execute_sql_query_offset_replay_guard_rejects_reused_cursor(monke
             side_effect=lambda *_args, **_kwargs: _conn_ctx(),
         ),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+        patch("mcp_server.tools.execute_sql_query.mcp_metrics.add_counter") as add_counter,
     ):
         first_payload = await handler("SELECT 1 AS id", tenant_id=1, page_size=2)
         first = json.loads(first_payload)
@@ -664,6 +670,36 @@ async def test_execute_sql_query_offset_replay_guard_rejects_reused_cursor(monke
     assert third["error"]["error_code"] == "VALIDATION_ERROR"
     assert third["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_REPLAY_DETECTED"
     assert third["metadata"]["pagination.reject_reason_code"] == "PAGINATION_CURSOR_REPLAY_DETECTED"
+    assert (
+        third["metadata"]["pagination.cursor.decode_reason_code"]
+        == "PAGINATION_CURSOR_REPLAY_DETECTED"
+    )
+    assert third["metadata"]["pagination.cursor.ttl_enabled"] is True
+    assert third["metadata"]["pagination.cursor.replay_guard_enabled"] is True
+
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+    assert attrs["pagination.cursor.ttl_enabled"] is True
+    assert attrs["pagination.cursor.replay_guard_enabled"] is True
+    assert attrs["pagination.cursor.decode_reason_code"] == "PAGINATION_CURSOR_REPLAY_DETECTED"
+
+    decode_failure_calls = [
+        call
+        for call in add_counter.call_args_list
+        if call.args and call.args[0] == "pagination.cursor.decode_failures_total"
+    ]
+    assert decode_failure_calls
+    decode_failure_attrs = decode_failure_calls[-1].kwargs.get("attributes", {})
+    assert decode_failure_attrs.get("reason_code") == "PAGINATION_CURSOR_REPLAY_DETECTED"
+    assert token not in json.dumps(decode_failure_attrs)
+    replay_calls = [
+        call
+        for call in add_counter.call_args_list
+        if call.args and call.args[0] == "pagination.cursor.replay_rejections_total"
+    ]
+    assert replay_calls
 
 
 @pytest.mark.asyncio
