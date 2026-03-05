@@ -153,6 +153,9 @@ def _tamper_keyset_cursor(
     *,
     issued_at_ms: int | None = None,
     ttl_ms: int | None = None,
+    drop_issued_at_ms: bool = False,
+    drop_ttl_ms: bool = False,
+    raw_ttl_ms: object | None = None,
     issued_at: int | None = None,
     max_age_s: int | None = None,
     secret: str = _TEST_SECRET,
@@ -168,6 +171,12 @@ def _tamper_keyset_cursor(
         payload["issued_at_ms"] = issued_at_ms
     if ttl_ms is not None:
         payload["ttl_ms"] = ttl_ms
+    if drop_issued_at_ms:
+        payload.pop("issued_at_ms", None)
+    if drop_ttl_ms:
+        payload.pop("ttl_ms", None)
+    if raw_ttl_ms is not None:
+        payload["ttl_ms"] = raw_ttl_ms
     if issued_at is not None:
         payload["issued_at"] = issued_at
     if max_age_s is not None:
@@ -360,6 +369,80 @@ async def test_cursor_expired_classification_parity_between_mcp_and_agent():
         == page_two["error"]["details_safe"]["reason_code"]
     )
     assert agent_result["error_metadata"]["error_code"] == page_two["error"]["error_code"]
+
+
+@pytest.mark.asyncio
+async def test_cursor_ttl_missing_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for missing cursor ttl metadata."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    page_one = await _invoke_mcp_federated_keyset(caps)
+    assert "error" not in page_one
+    cursor = page_one["metadata"]["next_keyset_cursor"]
+    assert cursor
+
+    missing_ttl_cursor = _tamper_keyset_cursor(
+        cursor,
+        drop_issued_at_ms=True,
+        drop_ttl_ms=True,
+    )
+    page_two = await _invoke_mcp_federated_keyset(caps, keyset_cursor=missing_ttl_cursor)
+    await _assert_agent_reason_parity(page_two, "PAGINATION_CURSOR_TTL_MISSING")
+
+
+@pytest.mark.asyncio
+async def test_cursor_ttl_invalid_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for invalid cursor ttl metadata."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    page_one = await _invoke_mcp_federated_keyset(caps)
+    assert "error" not in page_one
+    cursor = page_one["metadata"]["next_keyset_cursor"]
+    assert cursor
+
+    invalid_ttl_cursor = _tamper_keyset_cursor(cursor, raw_ttl_ms="not-an-int")
+    page_two = await _invoke_mcp_federated_keyset(caps, keyset_cursor=invalid_ttl_cursor)
+    await _assert_agent_reason_parity(page_two, "PAGINATION_CURSOR_TTL_INVALID")
+
+
+@pytest.mark.asyncio
+async def test_cursor_replay_detected_classification_parity_between_mcp_and_agent(monkeypatch):
+    """Agent must preserve MCP classification for replay-guard cursor rejections."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    monkeypatch.setenv("PAGINATION_CURSOR_REPLAY_GUARD_ENABLED", "true")
+
+    page_one = await _invoke_mcp_federated_keyset(caps)
+    assert "error" not in page_one
+    cursor = page_one["metadata"]["next_keyset_cursor"]
+    assert cursor
+
+    page_two = await _invoke_mcp_federated_keyset(caps, keyset_cursor=cursor)
+    assert "error" not in page_two
+
+    page_three = await _invoke_mcp_federated_keyset(caps, keyset_cursor=cursor)
+    await _assert_agent_reason_parity(page_three, "PAGINATION_CURSOR_REPLAY_DETECTED")
 
 
 @pytest.mark.asyncio
