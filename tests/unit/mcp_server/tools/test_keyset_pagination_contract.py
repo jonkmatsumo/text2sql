@@ -1308,8 +1308,8 @@ async def test_execute_sql_query_keyset_follow_up_expired_cursor_sanitized():
             base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
         )
         cursor_payload.pop("s", None)
-        cursor_payload["issued_at"] = 0
-        cursor_payload["max_age_s"] = 1
+        cursor_payload["issued_at_ms"] = 0
+        cursor_payload["ttl_ms"] = 1_000
         # Re-sign after tampering
         sig_data = json.dumps(cursor_payload, sort_keys=True)
         cursor_payload["s"] = hmac.new(
@@ -4118,7 +4118,19 @@ async def test_execute_sql_query_keyset_adaptive_page_size_is_deterministic(monk
             == metadata_two["pagination.keyset.adaptive_page_size"]
         )
         assert result_one["rows"] == result_two["rows"]
-        assert metadata_one.get("next_keyset_cursor") == metadata_two.get("next_keyset_cursor")
+        cursor_one = metadata_one.get("next_keyset_cursor")
+        cursor_two = metadata_two.get("next_keyset_cursor")
+        if cursor_one and cursor_two:
+            padded_one = cursor_one + "=" * (-len(cursor_one) % 4)
+            padded_two = cursor_two + "=" * (-len(cursor_two) % 4)
+            payload_one_cursor = json.loads(base64.urlsafe_b64decode(padded_one.encode("ascii")))
+            payload_two_cursor = json.loads(base64.urlsafe_b64decode(padded_two.encode("ascii")))
+            assert payload_one_cursor.get("v") == payload_two_cursor.get("v")
+            assert payload_one_cursor.get("k") == payload_two_cursor.get("k")
+            assert payload_one_cursor.get("nonce") != payload_two_cursor.get("nonce")
+        else:
+            assert cursor_one is None
+            assert cursor_two is None
         assert (
             metadata_one["pagination.keyset.cursor_emitted"]
             == metadata_two["pagination.keyset.cursor_emitted"]
