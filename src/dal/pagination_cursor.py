@@ -270,7 +270,24 @@ def build_cursor_envelope(
             message="Cursor payload must be an object.",
         )
 
+    raw_kind = raw_payload.get("cursor_kind")
+    if raw_kind is not None:
+        payload_kind = normalize_cursor_kind(raw_kind)
+        if payload_kind != normalized_kind:
+            raise CursorMigrationError(
+                reason_code=PAGINATION_CURSOR_KIND_UNSUPPORTED,
+                message=(
+                    f"Cursor kind '{payload_kind}' does not match expected "
+                    f"kind '{normalized_kind}'."
+                ),
+            )
+
     raw_version = raw_payload.get("cursor_version")
+    if raw_version is not None and raw_kind is None:
+        raise CursorMigrationError(
+            reason_code=PAGINATION_CURSOR_KIND_UNSUPPORTED,
+            message="Missing cursor_kind in versioned cursor payload.",
+        )
     if raw_version is None:
         if allow_legacy_v0:
             return CursorEnvelope(
