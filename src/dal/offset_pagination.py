@@ -20,13 +20,17 @@ from dal.pagination_cursor import (
     DEFAULT_CURSOR_TTL_MS,
     PAGINATION_CURSOR_CLOCK_SKEW,
     PAGINATION_CURSOR_EXPIRED,
+    PAGINATION_CURSOR_MIGRATION_UNSAFE,
     PAGINATION_CURSOR_REPLAY_DETECTED,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SIGNATURE_INVALID,
     PAGINATION_CURSOR_TTL_INVALID,
     PAGINATION_CURSOR_TTL_MISSING,
+    CursorMigrationError,
+    CursorMigrationRegistry,
     bounded_cursor_age_seconds,
+    build_cursor_envelope,
     build_cursor_nonce,
     cursor_now_epoch_milliseconds,
     normalize_cursor_milliseconds,
@@ -63,6 +67,129 @@ class OffsetPaginationToken:
     nonce: str | None = None
     query_fingerprint: str | None = None
     budget_snapshot: dict[str, Any] | None = None
+
+
+_OFFSET_CURSOR_KIND = "offset"
+_OFFSET_CURSOR_CURRENT_VERSION = 1
+
+
+def _extract_first_present(payload: dict[str, Any], *keys: str) -> Any:
+    """Return the first payload value found for any candidate key."""
+    for key in keys:
+        if key in payload:
+            return payload.get(key)
+    return None
+
+
+def _derived_legacy_offset_nonce(payload: dict[str, Any]) -> str:
+    """Derive deterministic nonce for legacy payloads that predate nonce support."""
+    nonce_seed = {
+        "o": payload.get("o"),
+        "l": payload.get("l"),
+        "f": payload.get("f"),
+        "issued_at_ms": payload.get("issued_at_ms"),
+        "ttl_ms": payload.get("ttl_ms"),
+        "query_fp": payload.get("query_fp"),
+        "scope_fp": payload.get("scope_fp"),
+    }
+    seed_bytes = json.dumps(nonce_seed, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    digest = hashlib.sha256(seed_bytes).hexdigest()[:32]
+    return f"legacy-{digest}"
+
+
+def _migrate_offset_payload_v0_to_v1(payload: dict[str, Any]) -> dict[str, Any]:
+    """Migrate legacy offset payloads to explicit v1 envelope fields."""
+    offset_raw = _extract_first_present(payload, "o", "offset")
+    limit_raw = _extract_first_present(payload, "l", "limit")
+    fingerprint_raw = _extract_first_present(payload, "f", "fingerprint")
+    offset = normalize_optional_int(offset_raw)
+    limit = normalize_optional_int(limit_raw)
+    fingerprint = str(fingerprint_raw).strip() if fingerprint_raw is not None else ""
+    if offset is None or limit is None or not fingerprint:
+        raise CursorMigrationError(
+            reason_code=PAGINATION_CURSOR_MIGRATION_UNSAFE,
+            message="Legacy offset cursor is missing required pagination fields.",
+        )
+
+    issued_at_ms = normalize_cursor_milliseconds(_extract_first_present(payload, "issued_at_ms"))
+    if issued_at_ms is None:
+        issued_at = normalize_optional_int(_extract_first_present(payload, "issued_at"))
+        if issued_at is not None:
+            issued_at_ms = normalize_cursor_milliseconds(issued_at * 1000)
+    ttl_ms = normalize_cursor_milliseconds(
+        _extract_first_present(payload, "ttl_ms"), allow_zero=False
+    )
+    if ttl_ms is None:
+        max_age_s = normalize_optional_int(_extract_first_present(payload, "max_age_s"))
+        if max_age_s is not None:
+            ttl_ms = normalize_cursor_milliseconds(max_age_s * 1000, allow_zero=False)
+    if issued_at_ms is None or ttl_ms is None:
+        raise CursorMigrationError(
+            reason_code=PAGINATION_CURSOR_MIGRATION_UNSAFE,
+            message="Legacy offset cursor cannot be migrated safely without ttl metadata.",
+        )
+
+    nonce = normalize_cursor_nonce(_extract_first_present(payload, "nonce"))
+    if nonce is None:
+        nonce = _derived_legacy_offset_nonce(
+            {
+                "o": int(offset),
+                "l": int(limit),
+                "f": fingerprint,
+                "issued_at_ms": int(issued_at_ms),
+                "ttl_ms": int(ttl_ms),
+                "query_fp": _extract_first_present(payload, "query_fp"),
+                "scope_fp": _extract_first_present(payload, "scope_fp"),
+            }
+        )
+    query_fp_raw = _extract_first_present(payload, "query_fp")
+    query_fp = str(query_fp_raw).strip() if isinstance(query_fp_raw, str) else ""
+    scope_fp = normalize_cursor_scope_fingerprint(_extract_first_present(payload, "scope_fp"))
+
+    migrated_payload: dict[str, Any] = {
+        "cursor_version": _OFFSET_CURSOR_CURRENT_VERSION,
+        "cursor_kind": _OFFSET_CURSOR_KIND,
+        "v": _OFFSET_CURSOR_CURRENT_VERSION,
+        "o": int(offset),
+        "l": int(limit),
+        "f": fingerprint,
+        "issued_at_ms": int(issued_at_ms),
+        "ttl_ms": int(ttl_ms),
+        "issued_at": int(issued_at_ms) // 1000,
+        "max_age_s": max(1, int(ttl_ms) // 1000),
+        "nonce": nonce,
+    }
+    if query_fp:
+        migrated_payload["query_fp"] = query_fp
+    if scope_fp:
+        migrated_payload["scope_fp"] = scope_fp
+    if "budget_snapshot" in payload:
+        migrated_payload["budget_snapshot"] = payload.get("budget_snapshot")
+    if "budget_fp" in payload:
+        migrated_payload["budget_fp"] = payload.get("budget_fp")
+    return migrated_payload
+
+
+_OFFSET_CURSOR_MIGRATION_REGISTRY = CursorMigrationRegistry(
+    current_versions={_OFFSET_CURSOR_KIND: _OFFSET_CURSOR_CURRENT_VERSION}
+)
+_OFFSET_CURSOR_MIGRATION_REGISTRY.register(
+    cursor_kind=_OFFSET_CURSOR_KIND,
+    from_version=0,
+    to_version=1,
+    migration=_migrate_offset_payload_v0_to_v1,
+)
+
+
+def _migrate_offset_payload(raw_payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize raw payload into current offset cursor payload contract."""
+    envelope = build_cursor_envelope(
+        raw_payload=raw_payload,
+        cursor_kind=_OFFSET_CURSOR_KIND,
+        allow_legacy_v0=True,
+    )
+    migrated = _OFFSET_CURSOR_MIGRATION_REGISTRY.migrate(envelope)
+    return migrated.payload
 
 
 def build_query_fingerprint(
@@ -159,6 +286,8 @@ def encode_offset_pagination_token(
         normalized_ttl_ms = DEFAULT_CURSOR_TTL_MS
 
     payload: dict[str, Any] = {
+        "cursor_version": _OFFSET_CURSOR_CURRENT_VERSION,
+        "cursor_kind": _OFFSET_CURSOR_KIND,
         "v": 1,
         "o": int(offset),
         "l": int(limit),
@@ -250,22 +379,6 @@ def decode_offset_pagination_token(
             message="Malformed pagination token payload.",
         )
 
-    try:
-        version = int(payload.get("v"))
-        offset = int(payload.get("o"))
-        limit = int(payload.get("l"))
-        fingerprint = str(payload.get("f"))
-    except Exception as exc:
-        raise OffsetPaginationTokenError(
-            reason_code="execution_pagination_page_token_malformed",
-            message="Malformed pagination token payload.",
-        ) from exc
-
-    if version != 1 or offset < 0 or limit <= 0 or not fingerprint:
-        raise OffsetPaginationTokenError(
-            reason_code="execution_pagination_page_token_malformed",
-            message="Malformed pagination token payload.",
-        )
     secret_value = (secret or "").strip()
     signature = raw_wrapper.get("s")
     if secret_value:
@@ -287,6 +400,32 @@ def decode_offset_pagination_token(
                 reason_code=PAGINATION_CURSOR_SIGNATURE_INVALID,
                 message="Invalid pagination token signature.",
             )
+
+    try:
+        payload = _migrate_offset_payload(payload)
+    except CursorMigrationError as exc:
+        if isinstance(decode_metadata, dict):
+            decode_metadata["validation_outcome"] = "INVALID"
+        raise OffsetPaginationTokenError(
+            reason_code=exc.reason_code,
+            message="Invalid pagination token metadata.",
+        ) from exc
+    try:
+        version = int(payload.get("v"))
+        offset = int(payload.get("o"))
+        limit = int(payload.get("l"))
+        fingerprint = str(payload.get("f"))
+    except Exception as exc:
+        raise OffsetPaginationTokenError(
+            reason_code="execution_pagination_page_token_malformed",
+            message="Malformed pagination token payload.",
+        ) from exc
+
+    if version != 1 or offset < 0 or limit <= 0 or not fingerprint:
+        raise OffsetPaginationTokenError(
+            reason_code="execution_pagination_page_token_malformed",
+            message="Malformed pagination token payload.",
+        )
 
     issued_at_ms_payload = payload.get("issued_at_ms")
     ttl_ms_payload = payload.get("ttl_ms")

@@ -96,15 +96,22 @@ def test_keyset_decode_accepts_new_cursor_with_issued_at():
 
 
 def test_offset_decode_rejects_missing_ttl_metadata_fail_closed():
-    """Offset tokens without required ttl metadata should fail closed."""
-    legacy_payload = {"p": {"v": 1, "o": 1, "l": 2, "f": "fp1"}}
-    legacy_token = base64.urlsafe_b64encode(json.dumps(legacy_payload).encode("utf-8")).decode(
-        "ascii"
-    )
+    """Current-format offset tokens without required ttl metadata should fail closed."""
+    payload = {
+        "p": {
+            "cursor_version": 1,
+            "cursor_kind": "offset",
+            "v": 1,
+            "o": 1,
+            "l": 2,
+            "f": "fp1",
+        }
+    }
+    token = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
     decode_metadata: dict[str, bool] = {}
     with pytest.raises(OffsetPaginationTokenError) as exc_info:
         decode_offset_pagination_token(
-            token=legacy_token,
+            token=token,
             expected_fingerprint="fp1",
             max_length=2048,
             decode_metadata=decode_metadata,
