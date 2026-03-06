@@ -122,13 +122,17 @@ def test_offset_decode_rejects_missing_ttl_metadata_fail_closed():
 
 def test_keyset_decode_rejects_missing_ttl_metadata_fail_closed():
     """Keyset cursors without required ttl metadata should fail closed."""
-    legacy_payload = {"v": [1], "k": ["id|asc|nulls_last"], "f": "fp1"}
-    legacy_cursor = base64.urlsafe_b64encode(json.dumps(legacy_payload).encode("utf-8")).decode(
-        "ascii"
-    )
+    payload = {
+        "cursor_version": 1,
+        "cursor_kind": "keyset",
+        "v": [1],
+        "k": ["id|asc|nulls_last"],
+        "f": "fp1",
+    }
+    cursor = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
     with pytest.raises(ValueError, match="PAGINATION_CURSOR_TTL_MISSING"):
         decode_keyset_cursor(
-            legacy_cursor,
+            cursor,
             expected_fingerprint="fp1",
             expected_keys=["id|asc|nulls_last"],
         )
