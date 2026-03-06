@@ -62,6 +62,9 @@ from dal.pagination_cursor import (
     MAX_CURSOR_TTL_MS,
     PAGINATION_CURSOR_CLOCK_SKEW,
     PAGINATION_CURSOR_EXPIRED,
+    PAGINATION_CURSOR_KIND_UNSUPPORTED,
+    PAGINATION_CURSOR_MIGRATION_PATH_MISSING,
+    PAGINATION_CURSOR_MIGRATION_UNSAFE,
     PAGINATION_CURSOR_REPLAY_DETECTED,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
     PAGINATION_CURSOR_SCOPE_MISSING,
@@ -69,6 +72,7 @@ from dal.pagination_cursor import (
     PAGINATION_CURSOR_SECRET_WEAK,
     PAGINATION_CURSOR_TTL_INVALID,
     PAGINATION_CURSOR_TTL_MISSING,
+    PAGINATION_CURSOR_VERSION_UNSUPPORTED,
     CursorSigningSecrets,
     build_cursor_scope_fingerprint,
 )
@@ -171,6 +175,11 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
     "PAGINATION_CURSOR_SIGNATURE_INVALID",
+    PAGINATION_CURSOR_VERSION_UNSUPPORTED,
+    PAGINATION_CURSOR_KIND_UNSUPPORTED,
+    PAGINATION_CURSOR_MIGRATION_PATH_MISSING,
+    PAGINATION_CURSOR_MIGRATION_UNSAFE,
+    "KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING",
     PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED,
     PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED,
     PAGINATION_GLOBAL_TIME_BUDGET_EXCEEDED,
@@ -228,6 +237,7 @@ _CURSOR_AGE_BUCKET_ALLOWLIST = {
     "900_3599",
     "3600_plus",
 }
+_CURSOR_MIGRATION_OUTCOME_ALLOWLIST = {"not_needed", "migrated", "rejected"}
 _CURSOR_DECODE_REASON_CODE_ALLOWLIST = {
     "execution_pagination_page_token_invalid",
     "execution_pagination_page_token_too_long",
@@ -251,6 +261,11 @@ _CURSOR_DECODE_REASON_CODE_ALLOWLIST = {
     "PAGINATION_CURSOR_SIGNATURE_INVALID",
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
+    PAGINATION_CURSOR_VERSION_UNSUPPORTED,
+    PAGINATION_CURSOR_KIND_UNSUPPORTED,
+    PAGINATION_CURSOR_MIGRATION_PATH_MISSING,
+    PAGINATION_CURSOR_MIGRATION_UNSAFE,
+    "KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING",
     PAGINATION_BUDGET_SNAPSHOT_INVALID,
 }
 _CURSOR_SECRET_MISCONFIG_REASON_ALLOWLIST = {
@@ -582,7 +597,20 @@ def _bounded_cursor_decode_reason_code(raw_reason_code: Any) -> str | None:
 
 def _cursor_secret_observability_fields(
     metadata: dict[str, Any] | None,
-) -> tuple[bool, bool, bool, bool, bool, bool, bool | None, str | None]:
+) -> tuple[
+    bool,
+    bool,
+    bool,
+    bool,
+    bool,
+    bool,
+    bool | None,
+    str | None,
+    bool,
+    str | None,
+    int | None,
+    int | None,
+]:
     cursor_metadata = metadata if isinstance(metadata, dict) else {}
     secret_configured = cursor_metadata.get("pagination.cursor.secret_configured")
     if secret_configured is None:
@@ -597,6 +625,16 @@ def _cursor_secret_observability_fields(
     decode_reason_code = _bounded_cursor_decode_reason_code(
         cursor_metadata.get("pagination.cursor.decode_reason_code")
     )
+    migration_attempted = bool(cursor_metadata.get("pagination.cursor.migration_attempted"))
+    migration_outcome = _normalize_cursor_migration_outcome(
+        cursor_metadata.get("pagination.cursor.migration_outcome")
+    )
+    original_version = _normalize_cursor_version(
+        cursor_metadata.get("pagination.cursor.original_version")
+    )
+    current_version = _normalize_cursor_version(
+        cursor_metadata.get("pagination.cursor.current_version")
+    )
     return (
         bool(secret_configured),
         bool(secret_valid),
@@ -606,6 +644,10 @@ def _cursor_secret_observability_fields(
         scope_mismatch,
         expired,
         decode_reason_code,
+        migration_attempted,
+        migration_outcome,
+        original_version,
+        current_version,
     )
 
 
@@ -619,6 +661,10 @@ def _record_cursor_secret_observability(metadata: dict[str, Any] | None) -> None
         scope_mismatch,
         expired,
         decode_reason_code,
+        migration_attempted,
+        migration_outcome,
+        original_version,
+        current_version,
     ) = _cursor_secret_observability_fields(metadata)
     span = trace.get_current_span()
     if span is not None and span.is_recording():
@@ -632,6 +678,13 @@ def _record_cursor_secret_observability(metadata: dict[str, Any] | None) -> None
             span.set_attribute("pagination.cursor.expired", expired)
         if decode_reason_code is not None:
             span.set_attribute("pagination.cursor.decode_reason_code", decode_reason_code)
+        span.set_attribute("pagination.cursor.migration_attempted", migration_attempted)
+        if migration_outcome is not None:
+            span.set_attribute("pagination.cursor.migration_outcome", migration_outcome)
+        if original_version is not None:
+            span.set_attribute("pagination.cursor.original_version", original_version)
+        if current_version is not None:
+            span.set_attribute("pagination.cursor.current_version", current_version)
     if decode_reason_code is not None:
         mcp_metrics.add_counter(
             "pagination.cursor.decode_failures_total",
@@ -813,6 +866,35 @@ def _normalize_cursor_age_bucket(raw_value: Any) -> str | None:
     return None
 
 
+def _normalize_cursor_migration_outcome(raw_value: Any) -> str | None:
+    if not isinstance(raw_value, str):
+        return None
+    normalized = raw_value.strip().lower()
+    if normalized in _CURSOR_MIGRATION_OUTCOME_ALLOWLIST:
+        return normalized
+    return None
+
+
+def _normalize_cursor_version(raw_value: Any) -> int | None:
+    if isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, int):
+        normalized = raw_value
+    elif isinstance(raw_value, str):
+        stripped = raw_value.strip()
+        if not stripped:
+            return None
+        try:
+            normalized = int(stripped)
+        except ValueError:
+            return None
+    else:
+        return None
+    if normalized < 0 or normalized > 1024:
+        return None
+    return normalized
+
+
 def _cursor_validation_outcome_from_reason_code(reason_code: Any) -> str | None:
     if not isinstance(reason_code, str):
         return None
@@ -830,6 +912,11 @@ def _cursor_validation_outcome_from_reason_code(reason_code: Any) -> str | None:
         "PAGINATION_CURSOR_SIGNATURE_INVALID": "SIGNATURE_INVALID",
         "PAGINATION_CURSOR_SECRET_MISSING": "SECRET_MISSING",
         "PAGINATION_CURSOR_SECRET_WEAK": "SECRET_WEAK",
+        PAGINATION_CURSOR_VERSION_UNSUPPORTED: "INVALID",
+        PAGINATION_CURSOR_KIND_UNSUPPORTED: "INVALID",
+        PAGINATION_CURSOR_MIGRATION_PATH_MISSING: "INVALID",
+        PAGINATION_CURSOR_MIGRATION_UNSAFE: "INVALID",
+        "KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING": "INVALID",
     }
     return mapping.get(reason)
 
@@ -874,6 +961,19 @@ def _apply_cursor_decode_metadata(
         envelope_metadata["pagination.cursor.replay_detected"] = bool(
             metadata.get("replay_detected")
         )
+    if "migration_attempted" in metadata:
+        envelope_metadata["pagination.cursor.migration_attempted"] = bool(
+            metadata.get("migration_attempted")
+        )
+    migration_outcome = _normalize_cursor_migration_outcome(metadata.get("migration_outcome"))
+    if migration_outcome is not None:
+        envelope_metadata["pagination.cursor.migration_outcome"] = migration_outcome
+    original_version = _normalize_cursor_version(metadata.get("original_version"))
+    if original_version is not None:
+        envelope_metadata["pagination.cursor.original_version"] = original_version
+    current_version = _normalize_cursor_version(metadata.get("current_version"))
+    if current_version is not None:
+        envelope_metadata["pagination.cursor.current_version"] = current_version
     validation_outcome = _normalize_cursor_validation_outcome(metadata.get("validation_outcome"))
     if validation_outcome is None:
         validation_outcome = _cursor_validation_outcome_from_reason_code(fallback_reason_code)
@@ -901,6 +1001,15 @@ def _apply_cursor_decode_metadata(
     if fallback_reason_code == PAGINATION_CURSOR_SCOPE_MISMATCH:
         envelope_metadata["pagination.cursor.scope_bound"] = True
         envelope_metadata["pagination.cursor.scope_mismatch"] = True
+    if fallback_reason_code in {
+        PAGINATION_CURSOR_VERSION_UNSUPPORTED,
+        PAGINATION_CURSOR_KIND_UNSUPPORTED,
+        PAGINATION_CURSOR_MIGRATION_PATH_MISSING,
+        PAGINATION_CURSOR_MIGRATION_UNSAFE,
+        "KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING",
+    }:
+        envelope_metadata["pagination.cursor.migration_outcome"] = "rejected"
+        envelope_metadata.setdefault("pagination.cursor.migration_attempted", True)
 
 
 def _normalize_keyset_context_value(value: Any) -> str | None:
@@ -3305,6 +3414,7 @@ async def handler(
 
                 from dal.keyset_pagination import (
                     KEYSET_CURSOR_ORDERBY_MISMATCH,
+                    KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING,
                     KEYSET_PARTITION_SET_CHANGED,
                     KEYSET_SHARD_MISMATCH,
                     KEYSET_SNAPSHOT_MISMATCH,
@@ -3490,6 +3600,13 @@ async def handler(
                                 reason_code,
                                 tiebreaker_present=True,
                             )
+                        elif KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING in str(e):
+                            reason_code = KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING
+                            _set_keyset_order_contract_error(
+                                tenant_enforcement_metadata,
+                                reason_code,
+                                tiebreaker_present=False,
+                            )
                         elif KEYSET_SNAPSHOT_MISMATCH in str(e):
                             reason_code = KEYSET_SNAPSHOT_MISMATCH
                             tenant_enforcement_metadata["pagination.keyset.snapshot_mismatch"] = (
@@ -3533,6 +3650,14 @@ async def handler(
                             tenant_enforcement_metadata["pagination.cursor.scope_mismatch"] = True
                         elif PAGINATION_BUDGET_SNAPSHOT_INVALID in str(e):
                             reason_code = PAGINATION_BUDGET_SNAPSHOT_INVALID
+                        elif PAGINATION_CURSOR_VERSION_UNSUPPORTED in str(e):
+                            reason_code = PAGINATION_CURSOR_VERSION_UNSUPPORTED
+                        elif PAGINATION_CURSOR_KIND_UNSUPPORTED in str(e):
+                            reason_code = PAGINATION_CURSOR_KIND_UNSUPPORTED
+                        elif PAGINATION_CURSOR_MIGRATION_PATH_MISSING in str(e):
+                            reason_code = PAGINATION_CURSOR_MIGRATION_PATH_MISSING
+                        elif PAGINATION_CURSOR_MIGRATION_UNSAFE in str(e):
+                            reason_code = PAGINATION_CURSOR_MIGRATION_UNSAFE
                         elif "PAGINATION_CURSOR_SIGNATURE_INVALID" in str(e):
                             reason_code = "PAGINATION_CURSOR_SIGNATURE_INVALID"
                             tenant_enforcement_metadata["pagination.cursor.signature_valid"] = False
@@ -4293,6 +4418,18 @@ async def handler(
                 ),
                 "pagination.cursor.decode_reason_code": tenant_enforcement_metadata.get(
                     "pagination.cursor.decode_reason_code"
+                ),
+                "pagination.cursor.migration_attempted": tenant_enforcement_metadata.get(
+                    "pagination.cursor.migration_attempted"
+                ),
+                "pagination.cursor.migration_outcome": tenant_enforcement_metadata.get(
+                    "pagination.cursor.migration_outcome"
+                ),
+                "pagination.cursor.original_version": tenant_enforcement_metadata.get(
+                    "pagination.cursor.original_version"
+                ),
+                "pagination.cursor.current_version": tenant_enforcement_metadata.get(
+                    "pagination.cursor.current_version"
                 ),
                 "pagination.cursor.signature_valid": tenant_enforcement_metadata.get(
                     "pagination.cursor.signature_valid"

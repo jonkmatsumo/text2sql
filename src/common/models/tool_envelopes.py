@@ -428,6 +428,32 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.cursor.decode_reason_code",
         serialization_alias="pagination.cursor.decode_reason_code",
     )
+    pagination_cursor_migration_attempted: Optional[bool] = Field(
+        None,
+        description="True when decode attempted to migrate a legacy cursor payload",
+        validation_alias="pagination.cursor.migration_attempted",
+        serialization_alias="pagination.cursor.migration_attempted",
+    )
+    pagination_cursor_migration_outcome: Optional[Literal["not_needed", "migrated", "rejected"]] = (
+        Field(
+            None,
+            description="Bounded cursor migration outcome for decode telemetry parity",
+            validation_alias="pagination.cursor.migration_outcome",
+            serialization_alias="pagination.cursor.migration_outcome",
+        )
+    )
+    pagination_cursor_original_version: Optional[int] = Field(
+        None,
+        description="Original cursor payload version observed before migration",
+        validation_alias="pagination.cursor.original_version",
+        serialization_alias="pagination.cursor.original_version",
+    )
+    pagination_cursor_current_version: Optional[int] = Field(
+        None,
+        description="Current cursor payload contract version used after migration",
+        validation_alias="pagination.cursor.current_version",
+        serialization_alias="pagination.cursor.current_version",
+    )
     pagination_cursor_signature_valid: Optional[bool] = Field(
         None,
         description="True when cursor HMAC signature was verified successfully",

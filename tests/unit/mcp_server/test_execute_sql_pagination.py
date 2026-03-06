@@ -11,12 +11,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from dal.execution_budget import budget_snapshot_fingerprint
 from dal.execution_resource_limits import ExecutionResourceLimits
 from dal.offset_pagination import (
     build_cursor_query_fingerprint,
     build_query_fingerprint,
     encode_offset_pagination_token,
 )
+from dal.pagination_cursor import PAGINATION_CURSOR_MIGRATION_UNSAFE
 from mcp_server.tools.execute_sql_query import handler
 
 _TEST_SECRET = "test-pagination-secret-for-unit-tests-2026"
@@ -29,6 +31,22 @@ _BUDGET_SNAPSHOT = {
     "consumed_bytes": 0,
     "consumed_duration_ms": 0,
 }
+
+
+def _encode_legacy_offset_token(payload: dict[str, object], *, sign: bool = True) -> str:
+    wrapper: dict[str, object] = {"p": payload}
+    if sign:
+        inner = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        wrapper["s"] = hmac.new(
+            _TEST_SECRET.encode("utf-8"), inner, digestmod=hashlib.sha256
+        ).hexdigest()
+    return (
+        base64.urlsafe_b64encode(
+            json.dumps(wrapper, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        )
+        .decode("ascii")
+        .rstrip("=")
+    )
 
 
 def test_build_query_fingerprint_changes_with_order_signature():
@@ -610,6 +628,201 @@ async def test_execute_sql_query_offset_pagination_rejects_expired_cursor_stable
     assert result["metadata"]["pagination.reject_reason_code"] == "PAGINATION_CURSOR_EXPIRED"
     assert result["metadata"]["pagination.cursor.expired"] is True
     assert result["metadata"]["pagination.cursor.decode_reason_code"] == "PAGINATION_CURSOR_EXPIRED"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_migration_telemetry_emits_with_span_parity():
+    """Migrated legacy offset cursor should emit bounded migration metadata + span parity."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql="SELECT 1 AS id",
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    legacy_token = _encode_legacy_offset_token(
+        {
+            "offset": 0,
+            "limit": 2,
+            "fingerprint": fingerprint,
+            "issued_at": int(time.time()),
+            "max_age_s": 120,
+            "scope_fp": _TEST_SCOPE_FP,
+            "budget_snapshot": _BUDGET_SNAPSHOT,
+            "budget_fp": budget_snapshot_fingerprint(_BUDGET_SNAPSHOT),
+        }
+    )
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+    ):
+        payload = await handler(
+            "SELECT 1 AS id",
+            tenant_id=1,
+            page_size=2,
+            page_token=legacy_token,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+    metadata = result["metadata"]
+    assert metadata["pagination.cursor.migration_attempted"] is True
+    assert metadata["pagination.cursor.migration_outcome"] == "migrated"
+    assert metadata["pagination.cursor.original_version"] == 0
+    assert metadata["pagination.cursor.current_version"] == 1
+
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+    assert attrs["pagination.cursor.migration_attempted"] is True
+    assert attrs["pagination.cursor.migration_outcome"] == "migrated"
+    assert attrs["pagination.cursor.original_version"] == 0
+    assert attrs["pagination.cursor.current_version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_rejected_migration_emits_bounded_reason_code():
+    """Rejected legacy migration should emit bounded reason + migration telemetry fields."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql="SELECT 1 AS id",
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    legacy_token = _encode_legacy_offset_token(
+        {
+            "offset": 0,
+            "limit": 2,
+            "fingerprint": fingerprint,
+            "issued_at": int(time.time()),
+            "scope_fp": _TEST_SCOPE_FP,
+        }
+    )
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+        patch("mcp_server.tools.execute_sql_query.mcp_metrics.add_counter") as add_counter,
+    ):
+        payload = await handler(
+            "SELECT 1 AS id",
+            tenant_id=1,
+            page_size=2,
+            page_token=legacy_token,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["details_safe"]["reason_code"] == PAGINATION_CURSOR_MIGRATION_UNSAFE
+    metadata = result["metadata"]
+    assert metadata["pagination.cursor.decode_reason_code"] == PAGINATION_CURSOR_MIGRATION_UNSAFE
+    assert metadata["pagination.cursor.migration_attempted"] is True
+    assert metadata["pagination.cursor.migration_outcome"] == "rejected"
+    assert metadata["pagination.cursor.original_version"] == 0
+    assert metadata["pagination.cursor.current_version"] == 1
+    assert metadata["pagination.cursor.migration_outcome"] in {"not_needed", "migrated", "rejected"}
+    assert metadata["pagination.cursor.original_version"] in {0, 1}
+    assert metadata["pagination.cursor.current_version"] in {0, 1}
+    assert legacy_token not in json.dumps(metadata)
+
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+    assert attrs["pagination.cursor.migration_attempted"] is True
+    assert attrs["pagination.cursor.migration_outcome"] == "rejected"
+    assert attrs["pagination.cursor.original_version"] == 0
+    assert attrs["pagination.cursor.current_version"] == 1
+
+    decode_failure_calls = [
+        call
+        for call in add_counter.call_args_list
+        if call.args and call.args[0] == "pagination.cursor.decode_failures_total"
+    ]
+    assert decode_failure_calls
+    decode_failure_attrs = decode_failure_calls[-1].kwargs.get("attributes", {})
+    assert decode_failure_attrs.get("reason_code") == PAGINATION_CURSOR_MIGRATION_UNSAFE
+    assert legacy_token not in json.dumps(decode_failure_attrs)
 
 
 @pytest.mark.asyncio

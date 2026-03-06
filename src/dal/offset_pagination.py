@@ -69,6 +69,17 @@ class OffsetPaginationToken:
     budget_snapshot: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class OffsetCursorMigrationResult:
+    """Normalized offset payload plus bounded migration telemetry fields."""
+
+    payload: dict[str, Any]
+    original_version: int
+    current_version: int
+    migration_attempted: bool
+    migration_outcome: str
+
+
 _OFFSET_CURSOR_KIND = "offset"
 _OFFSET_CURSOR_CURRENT_VERSION = 1
 
@@ -181,15 +192,26 @@ _OFFSET_CURSOR_MIGRATION_REGISTRY.register(
 )
 
 
-def _migrate_offset_payload(raw_payload: dict[str, Any]) -> dict[str, Any]:
+def _migrate_offset_payload(raw_payload: dict[str, Any]) -> OffsetCursorMigrationResult:
     """Normalize raw payload into current offset cursor payload contract."""
+    current_version = _OFFSET_CURSOR_MIGRATION_REGISTRY.current_version_for_kind(
+        _OFFSET_CURSOR_KIND
+    )
     envelope = build_cursor_envelope(
         raw_payload=raw_payload,
         cursor_kind=_OFFSET_CURSOR_KIND,
         allow_legacy_v0=True,
     )
+    original_version = int(envelope.cursor_version)
+    migration_attempted = original_version < current_version
     migrated = _OFFSET_CURSOR_MIGRATION_REGISTRY.migrate(envelope)
-    return migrated.payload
+    return OffsetCursorMigrationResult(
+        payload=migrated.payload,
+        original_version=original_version,
+        current_version=current_version,
+        migration_attempted=migration_attempted,
+        migration_outcome="migrated" if migration_attempted else "not_needed",
+    )
 
 
 def build_query_fingerprint(
@@ -402,14 +424,31 @@ def decode_offset_pagination_token(
             )
 
     try:
-        payload = _migrate_offset_payload(payload)
+        migration_result = _migrate_offset_payload(payload)
     except CursorMigrationError as exc:
         if isinstance(decode_metadata, dict):
+            raw_original_version = normalize_optional_int(payload.get("cursor_version"))
+            if raw_original_version is None and "cursor_version" not in payload:
+                raw_original_version = 0
+            decode_metadata["migration_attempted"] = bool(
+                raw_original_version is not None
+                and raw_original_version < _OFFSET_CURSOR_CURRENT_VERSION
+            )
+            decode_metadata["migration_outcome"] = "rejected"
+            if raw_original_version is not None:
+                decode_metadata["original_version"] = int(raw_original_version)
+            decode_metadata["current_version"] = _OFFSET_CURSOR_CURRENT_VERSION
             decode_metadata["validation_outcome"] = "INVALID"
         raise OffsetPaginationTokenError(
             reason_code=exc.reason_code,
             message="Invalid pagination token metadata.",
         ) from exc
+    payload = migration_result.payload
+    if isinstance(decode_metadata, dict):
+        decode_metadata["migration_attempted"] = migration_result.migration_attempted
+        decode_metadata["migration_outcome"] = migration_result.migration_outcome
+        decode_metadata["original_version"] = migration_result.original_version
+        decode_metadata["current_version"] = migration_result.current_version
     try:
         version = int(payload.get("v"))
         offset = int(payload.get("o"))
