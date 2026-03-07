@@ -46,6 +46,9 @@ _DRIFT_ERROR_CODE_ALIASES = {
     "success": "none",
 }
 _DRIFT_ERROR_MESSAGE_MAX_LEN = 200
+_DRIFT_ERROR_CODE_MAX_LEN = 64
+_DRIFT_RESOLUTION_MODE_MAX_LEN = 16
+_DRIFT_REFERENCE_VERSION_MAX_LEN = 128
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,8 @@ class DriftDetectionResult:
     error_message: str | None
     resolution_mode: str
     reference_model_version: str | None
+    reference_available: bool
+    reference_selection_source: str
     bucketing_requested: bool | None
     bucketing_used: bool | None
 
@@ -68,10 +73,14 @@ class DriftDetectionResult:
             "missing_identifiers": list(self.missing_identifiers),
             "method": self.method.value,
             "source": self.source,
+            "last_error_code": self.error_code,
             "error_code": self.error_code,
             "error_message": self.error_message,
+            "reference_resolution_mode": self.resolution_mode,
             "resolution_mode": self.resolution_mode,
             "reference_model_version": self.reference_model_version,
+            "reference_available": self.reference_available,
+            "reference_selection_source": self.reference_selection_source,
             "bucketing_requested": self.bucketing_requested,
             "bucketing_used": self.bucketing_used,
         }
@@ -89,7 +98,7 @@ def _bounded_text(value: Any, *, max_length: int) -> str | None:
 def _normalize_error_code(raw: Any) -> str | None:
     if not isinstance(raw, str):
         return None
-    normalized = raw.strip().lower()
+    normalized = raw.strip().lower()[:_DRIFT_ERROR_CODE_MAX_LEN]
     if not normalized:
         return None
     return _DRIFT_ERROR_CODE_ALIASES.get(normalized)
@@ -100,28 +109,46 @@ def _extract_resolution_mode(
 ) -> str:
     if error_metadata:
         for key in ("resolution_mode", "reference_resolution_mode"):
-            normalized = _bounded_text(error_metadata.get(key), max_length=16)
+            normalized = _bounded_text(
+                error_metadata.get(key), max_length=_DRIFT_RESOLUTION_MODE_MAX_LEN
+            )
             if normalized and normalized.lower() in _DRIFT_RESOLUTION_MODES:
                 return normalized.lower()
     return "latest" if has_reference else "none"
+
+
+def _extract_reference_selection_source(
+    error_metadata: Mapping[str, Any] | None, *, resolution_mode: str
+) -> str:
+    if error_metadata:
+        for key in ("reference_selection_source", "selection_source"):
+            normalized = _bounded_text(
+                error_metadata.get(key), max_length=_DRIFT_RESOLUTION_MODE_MAX_LEN
+            )
+            if normalized and normalized.lower() in _DRIFT_RESOLUTION_MODES:
+                return normalized.lower()
+    return resolution_mode
 
 
 def _extract_reference_model_version(error_metadata: Mapping[str, Any] | None) -> str | None:
     if not error_metadata:
         return None
     for key in ("reference_model_version", "reference_version", "model_version"):
-        normalized = _bounded_text(error_metadata.get(key), max_length=128)
+        normalized = _bounded_text(
+            error_metadata.get(key), max_length=_DRIFT_REFERENCE_VERSION_MAX_LEN
+        )
         if normalized:
             return normalized
     return None
 
 
-def _extract_optional_bool(error_metadata: Mapping[str, Any] | None, key: str) -> bool | None:
+def _extract_optional_bool(error_metadata: Mapping[str, Any] | None, *keys: str) -> bool | None:
     if not error_metadata:
         return None
-    value = error_metadata.get(key)
-    if isinstance(value, bool):
-        return value
+    for key in keys:
+        value = error_metadata.get(key)
+        if isinstance(value, bool):
+            return value
     return None
 
 
@@ -413,9 +440,14 @@ def detect_schema_drift_details(
     )
     error_message_out = raw_error_message if error_code and error_code != "none" else None
     resolution_mode = _extract_resolution_mode(metadata_map, has_reference=has_reference)
+    reference_selection_source = _extract_reference_selection_source(
+        metadata_map, resolution_mode=resolution_mode
+    )
     reference_model_version = _extract_reference_model_version(metadata_map)
-    bucketing_requested = _extract_optional_bool(metadata_map, "bucketing_requested")
-    bucketing_used = _extract_optional_bool(metadata_map, "bucketing_used")
+    bucketing_requested = _extract_optional_bool(
+        metadata_map, "bucketing_requested", "bucket_requested"
+    )
+    bucketing_used = _extract_optional_bool(metadata_map, "bucketing_used", "bucket_used")
 
     return DriftDetectionResult(
         missing_identifiers=missing_identifiers,
@@ -425,6 +457,8 @@ def detect_schema_drift_details(
         error_message=error_message_out,
         resolution_mode=resolution_mode,
         reference_model_version=reference_model_version,
+        reference_available=has_reference,
+        reference_selection_source=reference_selection_source,
         bucketing_requested=bucketing_requested,
         bucketing_used=bucketing_used,
     )

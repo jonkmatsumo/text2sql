@@ -2,6 +2,10 @@
 
 This document is the operator-facing source of truth for ML-adjacent hardening and containment flags in this repository.
 
+For runtime payload contracts (`diagnostics.ml_health` and drift result/error shape), use:
+
+- `docs/inference/ml_operability_contract.md`
+
 | Flag | Default | Scope | Effect | Where Read | Related Signals | When to Enable |
 | --- | --- | --- | --- | --- | --- | --- |
 | `SPACY_ENABLED` | `false` | Canonicalization runtime | Enables/disables SpaCy-backed canonicalization pipeline. | `src/mcp_server/services/canonicalization/spacy_pipeline.py` | Canonicalization availability and reload outcomes. | Enable once SpaCy models/patterns are deployed and validated. |

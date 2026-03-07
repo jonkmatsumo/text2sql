@@ -119,3 +119,77 @@ def test_operator_diagnostics_ml_health_config_reflects_enabled_env(monkeypatch)
     assert config["strict_split_strategy_validation"] is True
     assert config["strict_calibration_validation"] is True
     assert config["strict_schema_mismatch_blocking"] is True
+
+
+def test_ml_health_summary_optional_fields_use_null_convention():
+    """Optional ml_health fields should be present and normalized to null when invalid."""
+    summary = get_ml_health_summary(
+        model_manager_snapshot={
+            "state": " READY ",
+            "last_reload_status": " WARN_ONLY ",
+            "schema_mismatch_detected": {"unexpected": "map"},
+        },
+        benchmark_snapshot={"enabled": {"unexpected": True}, "last_status": ["bad"]},
+        drift_snapshot={
+            "error_code": "none",
+            "error_message": "should be hidden for none",
+            "reference_model_version": {"nested": "bad"},
+            "bucketing_requested": {"not": "bool"},
+            "bucketing_used": 1,
+        },
+        feature_coverage_snapshot={
+            "last_ratio": {"invalid": "shape"},
+            "below_threshold": ["not", "bool"],
+        },
+        strict_config={"strict_feature_schema": {"not": "bool"}},
+    )
+
+    assert set(summary.keys()) == {"model", "benchmark", "drift", "feature_coverage", "config"}
+    assert summary["model"]["state"] == "ready"
+    assert summary["model"]["last_reload_status"] == "warn_only"
+    assert summary["model"]["schema_mismatch_detected"] is False
+    assert summary["benchmark"]["enabled"] is False
+    assert summary["benchmark"]["last_status"] is None
+    assert summary["drift"]["error_code"] == "none"
+    assert summary["drift"]["last_error_code"] == "none"
+    assert summary["drift"]["error_message"] is None
+    assert summary["drift"]["reference_model_version"] is None
+    assert summary["drift"]["bucketing_requested"] is None
+    assert summary["drift"]["bucketing_used"] is None
+    assert summary["feature_coverage"]["last_ratio"] is None
+    assert summary["feature_coverage"]["below_threshold"] is None
+    assert summary["config"]["strict_feature_schema"] is False
+
+    for section in summary.values():
+        for value in section.values():
+            assert value is None or isinstance(value, (bool, int, float, str))
+            assert not isinstance(value, (list, dict))
+
+
+def test_ml_health_summary_bounds_status_and_error_strings():
+    """Status and error-like strings should be bounded and normalized."""
+    summary = get_ml_health_summary(
+        model_manager_snapshot={
+            "state": "X" * 80,
+            "last_reload_status": "Y" * 80,
+            "active_model_version": "model-" + ("z" * 200),
+        },
+        benchmark_snapshot={"last_status": "PASS_" + ("A" * 200)},
+        drift_snapshot={
+            "error_code": "E" * 200,
+            "error_message": "M" * 500,
+            "resolution_mode": "STAGE",
+            "reference_model_version": "ref-" + ("v" * 200),
+        },
+    )
+
+    assert summary["model"]["state"] == ("x" * 32)
+    assert summary["model"]["last_reload_status"] == ("y" * 32)
+    assert len(summary["model"]["active_model_version"]) == 128
+    assert summary["benchmark"]["last_status"] == ("pass_" + ("a" * 27))
+    assert len(summary["drift"]["error_code"]) == 64
+    assert len(summary["drift"]["last_error_code"]) == 64
+    assert len(summary["drift"]["error_message"]) == 200
+    assert summary["drift"]["resolution_mode"] == "stage"
+    assert summary["drift"]["reference_resolution_mode"] == "stage"
+    assert len(summary["drift"]["reference_model_version"]) == 128
