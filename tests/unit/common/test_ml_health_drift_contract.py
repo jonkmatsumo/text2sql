@@ -63,16 +63,24 @@ def test_drift_contract_shape_and_boundedness():
         "missing_identifiers",
         "method",
         "source",
+        "last_error_code",
         "error_code",
         "error_message",
+        "reference_resolution_mode",
         "resolution_mode",
         "reference_model_version",
+        "reference_available",
+        "reference_selection_source",
         "bucketing_requested",
         "bucketing_used",
     }
     assert result["error_code"] == "psi_sparse_buckets"
+    assert result["last_error_code"] == "psi_sparse_buckets"
     assert result["resolution_mode"] == "stage"
+    assert result["reference_resolution_mode"] == "stage"
     assert result["reference_model_version"] == "model-v3"
+    assert result["reference_available"] is False
+    assert result["reference_selection_source"] == "stage"
 
     assert isinstance(result["missing_identifiers"], list)
     assert len(result["missing_identifiers"]) <= 20

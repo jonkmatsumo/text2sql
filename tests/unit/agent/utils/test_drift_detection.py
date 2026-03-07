@@ -5,6 +5,32 @@ import pytest
 from agent.utils.drift_detection import detect_schema_drift, detect_schema_drift_details
 from common.constants.reason_codes import DriftDetectionMethod
 
+_DRIFT_CONTRACT_KEYS = {
+    "missing_identifiers",
+    "method",
+    "source",
+    "last_error_code",
+    "error_code",
+    "error_message",
+    "reference_resolution_mode",
+    "resolution_mode",
+    "reference_model_version",
+    "reference_available",
+    "reference_selection_source",
+    "bucketing_requested",
+    "bucketing_used",
+}
+
+
+def _assert_drift_contract_shape(payload: dict) -> None:
+    assert set(payload.keys()) == _DRIFT_CONTRACT_KEYS
+    assert payload["last_error_code"] == payload["error_code"]
+    assert payload["reference_resolution_mode"] == payload["resolution_mode"]
+    assert isinstance(payload["reference_available"], bool)
+    assert payload["reference_selection_source"] in {"alias", "stage", "latest", "none"}
+    if payload["error_message"] is not None:
+        assert len(payload["error_message"]) <= 200
+
 
 @pytest.fixture
 def raw_schema_context():
@@ -172,6 +198,10 @@ def test_drift_contract_no_reference_model_available():
     assert result.reference_model_version is None
     assert result.bucketing_requested is None
     assert result.bucketing_used is None
+    payload = result.to_dict()
+    _assert_drift_contract_shape(payload)
+    assert payload["reference_available"] is False
+    assert payload["reference_selection_source"] == "none"
 
 
 def test_drift_contract_insufficient_reference_samples_metadata():
@@ -197,6 +227,10 @@ def test_drift_contract_insufficient_reference_samples_metadata():
     assert result.reference_model_version == "model-v7"
     assert result.bucketing_requested is True
     assert result.bucketing_used is False
+    payload = result.to_dict()
+    _assert_drift_contract_shape(payload)
+    assert payload["reference_available"] is True
+    assert payload["reference_selection_source"] == "stage"
 
 
 def test_drift_contract_sparse_bucket_psi_suppression_maps_to_canonical_code():
@@ -212,6 +246,9 @@ def test_drift_contract_sparse_bucket_psi_suppression_maps_to_canonical_code():
     assert result.error_code == "psi_sparse_buckets"
     assert result.error_message == "PSI suppressed due to sparse buckets in reference histogram"
     assert result.resolution_mode == "alias"
+    payload = result.to_dict()
+    _assert_drift_contract_shape(payload)
+    assert payload["reference_selection_source"] == "alias"
 
 
 def test_drift_contract_success_path_keeps_error_fields_empty(raw_schema_context):
@@ -227,3 +264,7 @@ def test_drift_contract_success_path_keeps_error_fields_empty(raw_schema_context
     assert result.error_code is None
     assert result.error_message is None
     assert result.resolution_mode == "latest"
+    payload = result.to_dict()
+    _assert_drift_contract_shape(payload)
+    assert payload["reference_available"] is True
+    assert payload["reference_selection_source"] == "latest"
