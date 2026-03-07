@@ -21,6 +21,13 @@ from common.constants.ml_operability import (
     SCHEMA_MISMATCH_REASON_ALLOWLIST,
 )
 
+_ML_HEALTH_STATUS_MAX_LEN = 32
+_ML_HEALTH_MODEL_VERSION_MAX_LEN = 128
+_ML_HEALTH_ERROR_CODE_MAX_LEN = 64
+_ML_HEALTH_ERROR_MESSAGE_MAX_LEN = 200
+_ML_HEALTH_RESOLUTION_MODE_MAX_LEN = 16
+_ML_HEALTH_TIMESTAMP_MAX_LEN = 64
+
 
 def _safe_env_bool(name: str, default: bool) -> bool:
     try:
@@ -50,11 +57,18 @@ def _bounded_text(value: Any, *, max_length: int, default: str | None = None) ->
     return normalized[:max_length]
 
 
+def _bounded_status(value: Any, *, max_length: int, default: str | None = None) -> str | None:
+    normalized = _bounded_text(value, max_length=max_length, default=default)
+    if normalized is None:
+        return default
+    return normalized.lower()
+
+
 def _bounded_timestamp(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):
-        return _bounded_text(value, max_length=64)
+        return _bounded_text(value, max_length=_ML_HEALTH_TIMESTAMP_MAX_LEN)
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -75,8 +89,26 @@ def _bounded_ratio(value: Any) -> float | None:
     return numeric
 
 
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    return default
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _copy_mapping(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return dict(value)
+
+
 def _bounded_resolution_mode(value: Any) -> str:
-    normalized = _bounded_text(value, max_length=16, default=None)
+    normalized = _bounded_text(value, max_length=_ML_HEALTH_RESOLUTION_MODE_MAX_LEN, default=None)
     if normalized and normalized.lower() in {"alias", "stage", "latest", "none"}:
         return normalized.lower()
     return "none"
@@ -91,82 +123,92 @@ def get_ml_health_summary(
     strict_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a compact bounded ML health summary with stable keys."""
-    model = dict(model_manager_snapshot or {})
-    benchmark = dict(benchmark_snapshot or {})
-    drift = dict(drift_snapshot or {})
-    feature_coverage = dict(feature_coverage_snapshot or {})
-    config = dict(strict_config or {})
+    model = _copy_mapping(model_manager_snapshot)
+    benchmark = _copy_mapping(benchmark_snapshot)
+    drift = _copy_mapping(drift_snapshot)
+    feature_coverage = _copy_mapping(feature_coverage_snapshot)
+    config = _copy_mapping(strict_config)
     drift_error_code = (
-        _bounded_text(drift.get("error_code"), max_length=64)
-        or _bounded_text(drift.get("last_error_code"), max_length=64)
-        or _bounded_text(model.get("drift_fallback_reason"), max_length=64)
+        _bounded_status(drift.get("error_code"), max_length=_ML_HEALTH_ERROR_CODE_MAX_LEN)
+        or _bounded_status(drift.get("last_error_code"), max_length=_ML_HEALTH_ERROR_CODE_MAX_LEN)
+        or _bounded_status(
+            model.get("drift_fallback_reason"), max_length=_ML_HEALTH_ERROR_CODE_MAX_LEN
+        )
     )
     drift_resolution_mode = _bounded_resolution_mode(
         drift.get("resolution_mode") or drift.get("reference_resolution_mode")
     )
-    drift_error_message = _bounded_text(drift.get("error_message"), max_length=200)
+    drift_error_message = _bounded_text(
+        drift.get("error_message"), max_length=_ML_HEALTH_ERROR_MESSAGE_MAX_LEN
+    )
+    has_drift_error = drift_error_code not in {None, "none"}
 
     return {
         "model": {
-            "state": _bounded_text(model.get("state"), max_length=32, default="idle") or "idle",
+            "state": _bounded_status(
+                model.get("state"), max_length=_ML_HEALTH_STATUS_MAX_LEN, default="idle"
+            )
+            or "idle",
             "active_model_version": (
-                _bounded_text(model.get("active_model_version"), max_length=128, default="unknown")
+                _bounded_text(
+                    model.get("active_model_version"),
+                    max_length=_ML_HEALTH_MODEL_VERSION_MAX_LEN,
+                    default="unknown",
+                )
                 or "unknown"
             ),
             "last_reload_status": (
-                _bounded_text(model.get("last_reload_status"), max_length=32, default="not_loaded")
+                _bounded_status(
+                    model.get("last_reload_status"),
+                    max_length=_ML_HEALTH_STATUS_MAX_LEN,
+                    default="not_loaded",
+                )
                 or "not_loaded"
             ),
             "last_reload_ts": _bounded_timestamp(model.get("last_reload_ts")),
-            "schema_mismatch_detected": bool(model.get("schema_mismatch_detected", False)),
+            "schema_mismatch_detected": _coerce_bool(
+                model.get("schema_mismatch_detected"), default=False
+            ),
         },
         "benchmark": {
-            "enabled": bool(benchmark.get("enabled", False)),
-            "last_status": _bounded_text(benchmark.get("last_status"), max_length=32),
+            "enabled": _coerce_bool(benchmark.get("enabled"), default=False),
+            "last_status": _bounded_status(
+                benchmark.get("last_status"), max_length=_ML_HEALTH_STATUS_MAX_LEN
+            ),
             "last_run_ts": _bounded_timestamp(benchmark.get("last_run_ts")),
         },
         "drift": {
             "reference_resolution_mode": drift_resolution_mode,
             "last_error_code": drift_error_code,
             "error_code": drift_error_code,
-            "error_message": drift_error_message if drift_error_code else None,
+            "error_message": drift_error_message if has_drift_error else None,
             "resolution_mode": drift_resolution_mode,
             "reference_model_version": _bounded_text(
                 drift.get("reference_model_version"),
-                max_length=128,
+                max_length=_ML_HEALTH_MODEL_VERSION_MAX_LEN,
             ),
-            "bucketing_requested": (
-                bool(drift.get("bucketing_requested"))
-                if isinstance(drift.get("bucketing_requested"), bool)
-                else None
-            ),
-            "bucketing_used": (
-                bool(drift.get("bucketing_used"))
-                if isinstance(drift.get("bucketing_used"), bool)
-                else None
-            ),
+            "bucketing_requested": _optional_bool(drift.get("bucketing_requested")),
+            "bucketing_used": _optional_bool(drift.get("bucketing_used")),
         },
         "feature_coverage": {
             "last_ratio": _bounded_ratio(feature_coverage.get("last_ratio")),
-            "below_threshold": (
-                bool(feature_coverage["below_threshold"])
-                if isinstance(feature_coverage.get("below_threshold"), bool)
-                else None
-            ),
+            "below_threshold": _optional_bool(feature_coverage.get("below_threshold")),
         },
         "config": {
-            "strict_feature_schema": bool(config.get("strict_feature_schema", False)),
-            "strict_tuning_resume_validation": bool(
-                config.get("strict_tuning_resume_validation", False)
+            "strict_feature_schema": _coerce_bool(
+                config.get("strict_feature_schema"), default=False
             ),
-            "strict_split_strategy_validation": bool(
-                config.get("strict_split_strategy_validation", False)
+            "strict_tuning_resume_validation": _coerce_bool(
+                config.get("strict_tuning_resume_validation"), default=False
             ),
-            "strict_calibration_validation": bool(
-                config.get("strict_calibration_validation", False)
+            "strict_split_strategy_validation": _coerce_bool(
+                config.get("strict_split_strategy_validation"), default=False
             ),
-            "strict_schema_mismatch_blocking": bool(
-                config.get("strict_schema_mismatch_blocking", False)
+            "strict_calibration_validation": _coerce_bool(
+                config.get("strict_calibration_validation"), default=False
+            ),
+            "strict_schema_mismatch_blocking": _coerce_bool(
+                config.get("strict_schema_mismatch_blocking"), default=False
             ),
         },
     }
