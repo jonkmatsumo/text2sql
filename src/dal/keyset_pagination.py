@@ -21,13 +21,17 @@ from dal.pagination_cursor import (
     DEFAULT_CURSOR_TTL_MS,
     PAGINATION_CURSOR_CLOCK_SKEW,
     PAGINATION_CURSOR_EXPIRED,
+    PAGINATION_CURSOR_MIGRATION_UNSAFE,
     PAGINATION_CURSOR_REPLAY_DETECTED,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SIGNATURE_INVALID,
     PAGINATION_CURSOR_TTL_INVALID,
     PAGINATION_CURSOR_TTL_MISSING,
+    CursorMigrationError,
+    CursorMigrationRegistry,
     bounded_cursor_age_seconds,
+    build_cursor_envelope,
     build_cursor_nonce,
     cursor_now_epoch_milliseconds,
     normalize_cursor_milliseconds,
@@ -42,6 +46,7 @@ KEYSET_ORDER_BY_UNSAFE_EXPRESSION = "KEYSET_ORDER_BY_UNSAFE_EXPRESSION"
 KEYSET_ORDER_BY_AMBIGUOUS_COLUMN = "KEYSET_ORDER_BY_AMBIGUOUS_COLUMN"
 KEYSET_ORDER_BY_MISSING_TIEBREAKER = "KEYSET_ORDER_BY_MISSING_TIEBREAKER"
 KEYSET_CURSOR_ORDERBY_MISMATCH = "KEYSET_CURSOR_ORDERBY_MISMATCH"
+KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING = "KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING"
 # Backwards-compatible aliases used by existing imports/tests.
 KEYSET_REQUIRES_STABLE_TIEBREAKER = KEYSET_ORDER_BY_MISSING_TIEBREAKER
 KEYSET_ORDER_MISMATCH = KEYSET_CURSOR_ORDERBY_MISMATCH
@@ -240,6 +245,170 @@ class KeysetCursorPayload:
     context: Dict[str, str]
 
 
+@dataclass(frozen=True)
+class KeysetCursorMigrationResult:
+    """Normalized keyset payload plus bounded migration telemetry fields."""
+
+    payload: Dict[str, Any]
+    original_version: int
+    current_version: int
+    migration_attempted: bool
+    migration_outcome: str
+
+
+_KEYSET_CURSOR_KIND = "keyset"
+_KEYSET_CURSOR_CURRENT_VERSION = 1
+
+
+def _extract_first_present(payload: Dict[str, Any], *keys: str) -> Any:
+    """Return the first payload value found for any candidate key."""
+    for key in keys:
+        if key in payload:
+            return payload.get(key)
+    return None
+
+
+def _derive_legacy_keyset_nonce(payload: Dict[str, Any]) -> str:
+    """Derive deterministic nonce for legacy payloads that predate nonce support."""
+    nonce_seed = {
+        "v": payload.get("v"),
+        "k": payload.get("k"),
+        "f": payload.get("f"),
+        "issued_at_ms": payload.get("issued_at_ms"),
+        "ttl_ms": payload.get("ttl_ms"),
+        "query_fp": payload.get("query_fp"),
+        "scope_fp": payload.get("scope_fp"),
+    }
+    seed_bytes = json.dumps(nonce_seed, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return f"legacy-{hashlib.sha256(seed_bytes).hexdigest()[:32]}"
+
+
+def _migrate_keyset_payload_v0_to_v1(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Migrate legacy keyset payloads to explicit v1 envelope fields."""
+    values = _extract_first_present(payload, "v", "values")
+    if not isinstance(values, list):
+        raise CursorMigrationError(
+            reason_code=PAGINATION_CURSOR_MIGRATION_UNSAFE,
+            message="Legacy keyset cursor is missing keyset values.",
+        )
+
+    keys_raw = _extract_first_present(payload, "k", "keys")
+    if not isinstance(keys_raw, list):
+        raise CursorMigrationError(
+            reason_code=KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING,
+            message="Legacy keyset cursor is missing ORDER BY signature fields.",
+        )
+    normalized_keys = _normalize_order_signature_entries(keys_raw)
+    if not normalized_keys:
+        raise CursorMigrationError(
+            reason_code=KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING,
+            message="Legacy keyset cursor does not include a canonical ORDER BY signature.",
+        )
+
+    fingerprint_raw = _extract_first_present(payload, "f", "fingerprint")
+    fingerprint = str(fingerprint_raw).strip() if fingerprint_raw is not None else ""
+    if not fingerprint:
+        raise CursorMigrationError(
+            reason_code=PAGINATION_CURSOR_MIGRATION_UNSAFE,
+            message="Legacy keyset cursor is missing required fingerprint binding.",
+        )
+
+    issued_at_ms = normalize_cursor_milliseconds(_extract_first_present(payload, "issued_at_ms"))
+    if issued_at_ms is None:
+        issued_at = normalize_optional_int(_extract_first_present(payload, "issued_at"))
+        if issued_at is not None:
+            issued_at_ms = normalize_cursor_milliseconds(issued_at * 1000)
+    ttl_ms = normalize_cursor_milliseconds(
+        _extract_first_present(payload, "ttl_ms"), allow_zero=False
+    )
+    if ttl_ms is None:
+        max_age_s = normalize_optional_int(_extract_first_present(payload, "max_age_s"))
+        if max_age_s is not None:
+            ttl_ms = normalize_cursor_milliseconds(max_age_s * 1000, allow_zero=False)
+    if issued_at_ms is None or ttl_ms is None:
+        raise CursorMigrationError(
+            reason_code=PAGINATION_CURSOR_MIGRATION_UNSAFE,
+            message="Legacy keyset cursor cannot be migrated safely without ttl metadata.",
+        )
+
+    nonce = normalize_cursor_nonce(_extract_first_present(payload, "nonce"))
+    if nonce is None:
+        nonce = _derive_legacy_keyset_nonce(
+            {
+                "v": values,
+                "k": normalized_keys,
+                "f": fingerprint,
+                "issued_at_ms": int(issued_at_ms),
+                "ttl_ms": int(ttl_ms),
+                "query_fp": _extract_first_present(payload, "query_fp"),
+                "scope_fp": _extract_first_present(payload, "scope_fp"),
+            }
+        )
+    query_fp_raw = _extract_first_present(payload, "query_fp")
+    query_fp = str(query_fp_raw).strip() if isinstance(query_fp_raw, str) else ""
+    scope_fp = normalize_cursor_scope_fingerprint(_extract_first_present(payload, "scope_fp"))
+    cursor_context = _normalize_cursor_context(
+        _extract_first_present(payload, "c", "cursor_context")
+    )
+
+    migrated_payload: Dict[str, Any] = {
+        "cursor_version": _KEYSET_CURSOR_CURRENT_VERSION,
+        "cursor_kind": _KEYSET_CURSOR_KIND,
+        "v": values,
+        "k": normalized_keys,
+        "f": fingerprint,
+        "issued_at_ms": int(issued_at_ms),
+        "ttl_ms": int(ttl_ms),
+        "issued_at": int(issued_at_ms) // 1000,
+        "max_age_s": max(1, int(ttl_ms) // 1000),
+        "nonce": nonce,
+    }
+    if query_fp:
+        migrated_payload["query_fp"] = query_fp
+    if scope_fp:
+        migrated_payload["scope_fp"] = scope_fp
+    if cursor_context:
+        migrated_payload["c"] = cursor_context
+    if "budget_snapshot" in payload:
+        migrated_payload["budget_snapshot"] = payload.get("budget_snapshot")
+    if "budget_fp" in payload:
+        migrated_payload["budget_fp"] = payload.get("budget_fp")
+    return migrated_payload
+
+
+_KEYSET_CURSOR_MIGRATION_REGISTRY = CursorMigrationRegistry(
+    current_versions={_KEYSET_CURSOR_KIND: _KEYSET_CURSOR_CURRENT_VERSION}
+)
+_KEYSET_CURSOR_MIGRATION_REGISTRY.register(
+    cursor_kind=_KEYSET_CURSOR_KIND,
+    from_version=0,
+    to_version=1,
+    migration=_migrate_keyset_payload_v0_to_v1,
+)
+
+
+def _migrate_keyset_payload(raw_payload: Dict[str, Any]) -> KeysetCursorMigrationResult:
+    """Normalize raw keyset payload into current cursor payload contract."""
+    current_version = _KEYSET_CURSOR_MIGRATION_REGISTRY.current_version_for_kind(
+        _KEYSET_CURSOR_KIND
+    )
+    envelope = build_cursor_envelope(
+        raw_payload=raw_payload,
+        cursor_kind=_KEYSET_CURSOR_KIND,
+        allow_legacy_v0=True,
+    )
+    original_version = int(envelope.cursor_version)
+    migration_attempted = original_version < current_version
+    migrated = _KEYSET_CURSOR_MIGRATION_REGISTRY.migrate(envelope)
+    return KeysetCursorMigrationResult(
+        payload=migrated.payload,
+        original_version=original_version,
+        current_version=current_version,
+        migration_attempted=migration_attempted,
+        migration_outcome="migrated" if migration_attempted else "not_needed",
+    )
+
+
 def encode_keyset_cursor(
     values: List[Any],
     keys: List[str],
@@ -279,6 +448,8 @@ def encode_keyset_cursor(
     if normalized_ttl_ms is None:
         normalized_ttl_ms = DEFAULT_CURSOR_TTL_MS
     payload: Dict[str, Any] = {
+        "cursor_version": _KEYSET_CURSOR_CURRENT_VERSION,
+        "cursor_kind": _KEYSET_CURSOR_KIND,
         "v": [_json_serializable(v) for v in values],
         "k": keys,
         "f": fingerprint,
@@ -348,6 +519,30 @@ def decode_keyset_cursor(
                 if isinstance(decode_metadata, dict):
                     decode_metadata["validation_outcome"] = "SIGNATURE_INVALID"
                 raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_SIGNATURE_INVALID}.")
+
+        try:
+            migration_result = _migrate_keyset_payload(payload)
+        except CursorMigrationError as exc:
+            if isinstance(decode_metadata, dict):
+                raw_original_version = normalize_optional_int(payload.get("cursor_version"))
+                if raw_original_version is None and "cursor_version" not in payload:
+                    raw_original_version = 0
+                decode_metadata["migration_attempted"] = bool(
+                    raw_original_version is not None
+                    and raw_original_version < _KEYSET_CURSOR_CURRENT_VERSION
+                )
+                decode_metadata["migration_outcome"] = "rejected"
+                if raw_original_version is not None:
+                    decode_metadata["original_version"] = int(raw_original_version)
+                decode_metadata["current_version"] = _KEYSET_CURSOR_CURRENT_VERSION
+                decode_metadata["validation_outcome"] = "INVALID"
+            raise ValueError(f"Invalid cursor: {exc.reason_code}.") from exc
+        payload = migration_result.payload
+        if isinstance(decode_metadata, dict):
+            decode_metadata["migration_attempted"] = migration_result.migration_attempted
+            decode_metadata["migration_outcome"] = migration_result.migration_outcome
+            decode_metadata["original_version"] = migration_result.original_version
+            decode_metadata["current_version"] = migration_result.current_version
 
         payload_context = _normalize_cursor_context(payload.get("c"))
         required_context = _normalize_cursor_context(expected_cursor_context)

@@ -1,0 +1,7 @@
+{
+  "pagination.cursor.migration_attempted": true,
+  "pagination.cursor.migration_outcome": "rejected",
+  "pagination.cursor.original_version": 0,
+  "pagination.cursor.current_version": 1,
+  "pagination.cursor.decode_reason_code": "PAGINATION_CURSOR_MIGRATION_UNSAFE"
+}

@@ -1,0 +1,6 @@
+{
+  "pagination.cursor.migration_attempted": true,
+  "pagination.cursor.migration_outcome": "migrated",
+  "pagination.cursor.original_version": 0,
+  "pagination.cursor.current_version": 1
+}

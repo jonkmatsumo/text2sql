@@ -75,7 +75,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from threading import Lock
-from typing import Any
+from typing import Any, Callable
 
 PAGINATION_CURSOR_SECRET_MISSING = "PAGINATION_CURSOR_SECRET_MISSING"
 PAGINATION_CURSOR_SECRET_WEAK = "PAGINATION_CURSOR_SECRET_WEAK"
@@ -87,6 +87,10 @@ PAGINATION_CURSOR_TTL_INVALID = "PAGINATION_CURSOR_TTL_INVALID"
 PAGINATION_CURSOR_EXPIRED = "PAGINATION_CURSOR_EXPIRED"
 PAGINATION_CURSOR_CLOCK_SKEW = "PAGINATION_CURSOR_CLOCK_SKEW"
 PAGINATION_CURSOR_REPLAY_DETECTED = "PAGINATION_CURSOR_REPLAY_DETECTED"
+PAGINATION_CURSOR_VERSION_UNSUPPORTED = "PAGINATION_CURSOR_VERSION_UNSUPPORTED"
+PAGINATION_CURSOR_KIND_UNSUPPORTED = "PAGINATION_CURSOR_KIND_UNSUPPORTED"
+PAGINATION_CURSOR_MIGRATION_PATH_MISSING = "PAGINATION_CURSOR_MIGRATION_PATH_MISSING"
+PAGINATION_CURSOR_MIGRATION_UNSAFE = "PAGINATION_CURSOR_MIGRATION_UNSAFE"
 PAGINATION_CURSOR_MIN_SECRET_BYTES = 32
 PAGINATION_CURSOR_SCOPE_FINGERPRINT_HEX_LENGTH = 16
 CURSOR_MAX_SIGNED_INT = 9_223_372_036_854_775_807
@@ -100,6 +104,213 @@ CURSOR_NONCE_MAX_LENGTH = 128
 
 _PRIMARY_CURSOR_SECRET_ENV = "PAGINATION_CURSOR_HMAC_SECRET"
 _LEGACY_CURSOR_SECRET_ENV = "PAGINATION_CURSOR_SIGNING_SECRET"
+
+SUPPORTED_CURSOR_KINDS = frozenset({"offset", "keyset"})
+CursorMigrationFn = Callable[[dict[str, Any]], dict[str, Any]]
+
+
+class CursorMigrationError(ValueError):
+    """Raised when cursor envelope detection or migration fails closed."""
+
+    def __init__(self, *, reason_code: str, message: str) -> None:
+        """Initialize migration failure with a stable reason code."""
+        super().__init__(f"{reason_code}: {message}")
+        self.reason_code = reason_code
+
+
+@dataclass(frozen=True)
+class CursorEnvelope:
+    """Canonical cursor envelope used by migration-aware decode flows."""
+
+    cursor_version: int
+    cursor_kind: str
+    payload: dict[str, Any]
+
+
+class CursorMigrationRegistry:
+    """Bounded deterministic migration registry for versioned cursor payloads."""
+
+    def __init__(self, *, current_versions: dict[str, int]) -> None:
+        """Initialize registry with explicit current versions by cursor kind."""
+        self._current_versions: dict[str, int] = {}
+        for raw_kind, raw_version in current_versions.items():
+            cursor_kind = normalize_cursor_kind(raw_kind)
+            try:
+                normalized_version = int(raw_version)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Invalid current cursor version for kind '{cursor_kind}'."
+                ) from exc
+            if normalized_version < 0:
+                raise ValueError(
+                    f"Current cursor version must be non-negative for kind '{cursor_kind}'."
+                )
+            self._current_versions[cursor_kind] = normalized_version
+        self._migrations: dict[tuple[str, int, int], CursorMigrationFn] = {}
+
+    def register(
+        self,
+        *,
+        cursor_kind: str,
+        from_version: int,
+        to_version: int,
+        migration: CursorMigrationFn,
+    ) -> None:
+        """Register one deterministic migration step for a cursor kind."""
+        normalized_kind = normalize_cursor_kind(cursor_kind)
+        if normalized_kind not in self._current_versions:
+            raise CursorMigrationError(
+                reason_code=PAGINATION_CURSOR_KIND_UNSUPPORTED,
+                message=f"Unsupported cursor kind '{normalized_kind}'.",
+            )
+        if not callable(migration):
+            raise ValueError("Cursor migration must be callable.")
+        if not isinstance(from_version, int) or not isinstance(to_version, int):
+            raise ValueError("Cursor migration versions must be integers.")
+        if from_version < 0 or to_version < 0:
+            raise ValueError("Cursor migration versions must be non-negative.")
+        if to_version != from_version + 1:
+            raise ValueError("Cursor migrations must register deterministic stepwise transitions.")
+        key = (normalized_kind, from_version, to_version)
+        if key in self._migrations:
+            raise ValueError(
+                "Cursor migration step is already registered for "
+                f"{normalized_kind}:{from_version}->{to_version}."
+            )
+        self._migrations[key] = migration
+
+    def current_version_for_kind(self, cursor_kind: str) -> int:
+        """Return the configured current version for a supported cursor kind."""
+        normalized_kind = normalize_cursor_kind(cursor_kind)
+        if normalized_kind not in self._current_versions:
+            raise CursorMigrationError(
+                reason_code=PAGINATION_CURSOR_KIND_UNSUPPORTED,
+                message=f"Unsupported cursor kind '{normalized_kind}'.",
+            )
+        return self._current_versions[normalized_kind]
+
+    def migrate(self, envelope: CursorEnvelope) -> CursorEnvelope:
+        """Migrate an envelope to the configured current version fail-closed."""
+        normalized_kind = normalize_cursor_kind(envelope.cursor_kind)
+        if normalized_kind not in self._current_versions:
+            raise CursorMigrationError(
+                reason_code=PAGINATION_CURSOR_KIND_UNSUPPORTED,
+                message=f"Unsupported cursor kind '{normalized_kind}'.",
+            )
+
+        current_version = self._current_versions[normalized_kind]
+        source_version = int(envelope.cursor_version)
+        if source_version < 0 or source_version > current_version:
+            raise CursorMigrationError(
+                reason_code=PAGINATION_CURSOR_VERSION_UNSUPPORTED,
+                message=f"Unsupported cursor version '{source_version}'.",
+            )
+        if source_version == current_version:
+            return CursorEnvelope(
+                cursor_version=current_version,
+                cursor_kind=normalized_kind,
+                payload=dict(envelope.payload),
+            )
+
+        migrated_payload = dict(envelope.payload)
+        step_version = source_version
+        while step_version < current_version:
+            next_version = step_version + 1
+            migration = self._migrations.get((normalized_kind, step_version, next_version))
+            if migration is None:
+                raise CursorMigrationError(
+                    reason_code=PAGINATION_CURSOR_MIGRATION_PATH_MISSING,
+                    message=(
+                        "Missing cursor migration step for "
+                        f"{normalized_kind}:{step_version}->{next_version}."
+                    ),
+                )
+            migrated_payload = migration(dict(migrated_payload))
+            if not isinstance(migrated_payload, dict):
+                raise CursorMigrationError(
+                    reason_code=PAGINATION_CURSOR_MIGRATION_PATH_MISSING,
+                    message="Cursor migration output must be an object payload.",
+                )
+            step_version = next_version
+
+        return CursorEnvelope(
+            cursor_version=current_version,
+            cursor_kind=normalized_kind,
+            payload=migrated_payload,
+        )
+
+
+def normalize_cursor_kind(cursor_kind: Any) -> str:
+    """Normalize supported cursor kind values for migration-aware decode flows."""
+    if not isinstance(cursor_kind, str):
+        raise CursorMigrationError(
+            reason_code=PAGINATION_CURSOR_KIND_UNSUPPORTED,
+            message="Unsupported cursor kind.",
+        )
+    normalized_kind = cursor_kind.strip().lower()
+    if normalized_kind in SUPPORTED_CURSOR_KINDS:
+        return normalized_kind
+    raise CursorMigrationError(
+        reason_code=PAGINATION_CURSOR_KIND_UNSUPPORTED,
+        message=f"Unsupported cursor kind '{normalized_kind}'.",
+    )
+
+
+def build_cursor_envelope(
+    *,
+    raw_payload: Any,
+    cursor_kind: str,
+    allow_legacy_v0: bool = False,
+) -> CursorEnvelope:
+    """Construct a cursor envelope from raw payload with explicit legacy-v0 handling."""
+    normalized_kind = normalize_cursor_kind(cursor_kind)
+    if not isinstance(raw_payload, dict):
+        raise CursorMigrationError(
+            reason_code=PAGINATION_CURSOR_VERSION_UNSUPPORTED,
+            message="Cursor payload must be an object.",
+        )
+
+    raw_kind = raw_payload.get("cursor_kind")
+    if raw_kind is not None:
+        payload_kind = normalize_cursor_kind(raw_kind)
+        if payload_kind != normalized_kind:
+            raise CursorMigrationError(
+                reason_code=PAGINATION_CURSOR_KIND_UNSUPPORTED,
+                message=(
+                    f"Cursor kind '{payload_kind}' does not match expected "
+                    f"kind '{normalized_kind}'."
+                ),
+            )
+
+    raw_version = raw_payload.get("cursor_version")
+    if raw_version is not None and raw_kind is None:
+        raise CursorMigrationError(
+            reason_code=PAGINATION_CURSOR_KIND_UNSUPPORTED,
+            message="Missing cursor_kind in versioned cursor payload.",
+        )
+    if raw_version is None:
+        if allow_legacy_v0:
+            return CursorEnvelope(
+                cursor_version=0,
+                cursor_kind=normalized_kind,
+                payload=dict(raw_payload),
+            )
+        raise CursorMigrationError(
+            reason_code=PAGINATION_CURSOR_VERSION_UNSUPPORTED,
+            message="Missing cursor_version in cursor payload.",
+        )
+
+    normalized_version = normalize_optional_int(raw_version)
+    if normalized_version is None or normalized_version < 0:
+        raise CursorMigrationError(
+            reason_code=PAGINATION_CURSOR_VERSION_UNSUPPORTED,
+            message=f"Unsupported cursor version '{raw_version}'.",
+        )
+    return CursorEnvelope(
+        cursor_version=normalized_version,
+        cursor_kind=normalized_kind,
+        payload=dict(raw_payload),
+    )
 
 
 class CursorSigningSecretMissing(ValueError):
