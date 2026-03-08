@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -24,6 +24,7 @@ from mcp_server.tools.execute_sql_query import handler
 pytestmark = pytest.mark.pagination
 
 _TEST_SECRET = "test-pagination-secret-for-unit-tests-2026"
+_PREVIOUS_SECRET = "test-pagination-secret-for-unit-tests-2025"
 _WEAK_SECRET = "weak-secret"
 _BUDGET_SNAPSHOT = {
     "max_total_rows": 1000,
@@ -729,3 +730,96 @@ async def test_signature_valid_false_on_keyset_signature_mismatch():
     meta = result.get("metadata", {})
     assert meta.get("pagination.cursor.signature_valid") is False
     assert meta.get("pagination.cursor.signing_secret_configured") is True
+
+
+# ---------------------------------------------------------------------------
+# 5. Rotation telemetry parity
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_secondary_key_decode_sets_rotation_telemetry_and_span_parity(monkeypatch):
+    """Secondary-key decode should emit bounded parity metadata/span fields."""
+    monkeypatch.setenv("PAGINATION_CURSOR_SIGNING_ACTIVE_KID", "active")
+    monkeypatch.setenv(
+        "PAGINATION_CURSOR_SIGNING_KEYS_JSON",
+        json.dumps({"active": _TEST_SECRET, "previous": _PREVIOUS_SECRET}),
+    )
+    monkeypatch.delenv("PAGINATION_CURSOR_SIGNING_SECRET", raising=False)
+    monkeypatch.delenv("PAGINATION_CURSOR_HMAC_SECRET", raising=False)
+
+    cursor = encode_keyset_cursor(
+        [1],
+        ["id|asc|nulls_last"],
+        "stable-fp",
+        secret=_PREVIOUS_SECRET,
+        kid="previous",
+        query_fp="cursor-query-fp",
+        scope_fp="abcdeffedcba0123",
+        budget_snapshot=_BUDGET_SNAPSHOT,
+    )
+    span = MagicMock()
+    span.is_recording.return_value = True
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=_keyset_caps()),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch(
+            "dal.database.Database.get_connection",
+            side_effect=lambda *_a, **_kw: _conn_ctx(_make_conn(rows=[{"id": 1}])),
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint", return_value="stable-fp"
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_query_fingerprint",
+            return_value="cursor-query-fp",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value="abcdeffedcba0123",
+        ),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=span),
+        patch("mcp_server.tools.execute_sql_query.mcp_metrics.add_counter") as add_counter,
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=cursor,
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+    meta = result.get("metadata", {})
+    assert meta.get("pagination.cursor.kid_present") is True
+    assert meta.get("pagination.cursor.kid_active_match") is False
+    assert meta.get("pagination.cursor.rotation_verification_path") == "secondary"
+
+    span_attrs = {
+        call.args[0]: call.args[1]
+        for call in span.set_attribute.call_args_list
+        if len(call.args) >= 2
+    }
+    assert span_attrs.get("pagination.cursor.kid_present") == meta.get(
+        "pagination.cursor.kid_present"
+    )
+    assert span_attrs.get("pagination.cursor.kid_active_match") == meta.get(
+        "pagination.cursor.kid_active_match"
+    )
+    assert span_attrs.get("pagination.cursor.rotation_verification_path") == meta.get(
+        "pagination.cursor.rotation_verification_path"
+    )
+
+    secondary_calls = [
+        call
+        for call in add_counter.call_args_list
+        if call.args and call.args[0] == "pagination.cursor.secondary_key_verifications_total"
+    ]
+    assert secondary_calls
+
+    serialized = json.dumps(result)
+    assert _PREVIOUS_SECRET not in serialized

@@ -551,12 +551,19 @@ def decode_keyset_cursor(
         if payload_kid is None:
             if isinstance(decode_metadata, dict):
                 decode_metadata["validation_outcome"] = "INVALID"
+                decode_metadata["rotation_verification_path"] = "error"
             raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_KID_MISSING}.")
 
         verifier_secret = (secret or "").strip()
         if signing_keyring is not None:
             try:
                 verifier_secret = signing_keyring.resolve_verifier_secret(payload_kid)
+                if isinstance(decode_metadata, dict):
+                    kid_active_match = bool(payload_kid == signing_keyring.active_kid)
+                    decode_metadata["kid_active_match"] = kid_active_match
+                    decode_metadata["rotation_verification_path"] = (
+                        "active" if kid_active_match else "secondary"
+                    )
             except Exception as exc:
                 reason_code = getattr(exc, "reason_code", PAGINATION_CURSOR_KEYRING_INVALID)
                 if reason_code not in {
@@ -568,6 +575,7 @@ def decode_keyset_cursor(
                     reason_code = PAGINATION_CURSOR_KEYRING_INVALID
                 if isinstance(decode_metadata, dict):
                     decode_metadata["validation_outcome"] = "INVALID"
+                    decode_metadata["rotation_verification_path"] = "error"
                 raise ValueError(f"Invalid cursor: {reason_code}.") from exc
 
         if verifier_secret:

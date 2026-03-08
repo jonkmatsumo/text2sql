@@ -422,6 +422,28 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.cursor.replay_guard_enabled",
         serialization_alias="pagination.cursor.replay_guard_enabled",
     )
+    pagination_cursor_kid_present: Optional[bool] = Field(
+        None,
+        description="True when decoded cursor metadata included a signing key id (kid)",
+        validation_alias="pagination.cursor.kid_present",
+        serialization_alias="pagination.cursor.kid_present",
+    )
+    pagination_cursor_kid_active_match: Optional[bool] = Field(
+        None,
+        description="True when decoded cursor kid matches the currently active signing key",
+        validation_alias="pagination.cursor.kid_active_match",
+        serialization_alias="pagination.cursor.kid_active_match",
+    )
+    pagination_cursor_rotation_verification_path: Optional[
+        Literal["active", "secondary", "error"]
+    ] = Field(
+        None,
+        description=(
+            "Bounded cursor-key verification path classification for secret rotation telemetry"
+        ),
+        validation_alias="pagination.cursor.rotation_verification_path",
+        serialization_alias="pagination.cursor.rotation_verification_path",
+    )
     pagination_cursor_decode_reason_code: Optional[str] = Field(
         None,
         description="Bounded cursor decode failure classification reason code",

@@ -443,6 +443,7 @@ def decode_offset_pagination_token(
     if payload_kid is None:
         if isinstance(decode_metadata, dict):
             decode_metadata["validation_outcome"] = "INVALID"
+            decode_metadata["rotation_verification_path"] = "error"
         raise OffsetPaginationTokenError(
             reason_code=PAGINATION_CURSOR_KID_MISSING,
             message="Invalid pagination token metadata.",
@@ -452,6 +453,12 @@ def decode_offset_pagination_token(
     if signing_keyring is not None:
         try:
             secret_value = signing_keyring.resolve_verifier_secret(payload_kid)
+            if isinstance(decode_metadata, dict):
+                kid_active_match = bool(payload_kid == signing_keyring.active_kid)
+                decode_metadata["kid_active_match"] = kid_active_match
+                decode_metadata["rotation_verification_path"] = (
+                    "active" if kid_active_match else "secondary"
+                )
         except Exception as exc:
             reason_code = getattr(exc, "reason_code", PAGINATION_CURSOR_KEYRING_INVALID)
             if reason_code not in {
@@ -463,6 +470,7 @@ def decode_offset_pagination_token(
                 reason_code = PAGINATION_CURSOR_KEYRING_INVALID
             if isinstance(decode_metadata, dict):
                 decode_metadata["validation_outcome"] = "INVALID"
+                decode_metadata["rotation_verification_path"] = "error"
             raise OffsetPaginationTokenError(
                 reason_code=reason_code,
                 message="Invalid pagination token metadata.",

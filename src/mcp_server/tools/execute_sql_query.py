@@ -244,6 +244,7 @@ _CURSOR_AGE_BUCKET_ALLOWLIST = {
     "3600_plus",
 }
 _CURSOR_MIGRATION_OUTCOME_ALLOWLIST = {"not_needed", "migrated", "rejected"}
+_CURSOR_ROTATION_VERIFICATION_PATH_ALLOWLIST = {"active", "secondary", "error"}
 _CURSOR_DECODE_REASON_CODE_ALLOWLIST = {
     "execution_pagination_page_token_invalid",
     "execution_pagination_page_token_too_long",
@@ -620,6 +621,9 @@ def _cursor_secret_observability_fields(
     str | None,
     int | None,
     int | None,
+    bool,
+    bool | None,
+    str | None,
 ]:
     cursor_metadata = metadata if isinstance(metadata, dict) else {}
     secret_configured = cursor_metadata.get("pagination.cursor.secret_configured")
@@ -645,6 +649,12 @@ def _cursor_secret_observability_fields(
     current_version = _normalize_cursor_version(
         cursor_metadata.get("pagination.cursor.current_version")
     )
+    kid_present = bool(cursor_metadata.get("pagination.cursor.kid_present"))
+    kid_active_match_raw = cursor_metadata.get("pagination.cursor.kid_active_match")
+    kid_active_match = bool(kid_active_match_raw) if kid_active_match_raw is not None else None
+    rotation_verification_path = _normalize_cursor_rotation_verification_path(
+        cursor_metadata.get("pagination.cursor.rotation_verification_path")
+    )
     return (
         bool(secret_configured),
         bool(secret_valid),
@@ -658,6 +668,9 @@ def _cursor_secret_observability_fields(
         migration_outcome,
         original_version,
         current_version,
+        kid_present,
+        kid_active_match,
+        rotation_verification_path,
     )
 
 
@@ -675,6 +688,9 @@ def _record_cursor_secret_observability(metadata: dict[str, Any] | None) -> None
         migration_outcome,
         original_version,
         current_version,
+        kid_present,
+        kid_active_match,
+        rotation_verification_path,
     ) = _cursor_secret_observability_fields(metadata)
     span = trace.get_current_span()
     if span is not None and span.is_recording():
@@ -695,6 +711,13 @@ def _record_cursor_secret_observability(metadata: dict[str, Any] | None) -> None
             span.set_attribute("pagination.cursor.original_version", original_version)
         if current_version is not None:
             span.set_attribute("pagination.cursor.current_version", current_version)
+        span.set_attribute("pagination.cursor.kid_present", kid_present)
+        if kid_active_match is not None:
+            span.set_attribute("pagination.cursor.kid_active_match", kid_active_match)
+        if rotation_verification_path is not None:
+            span.set_attribute(
+                "pagination.cursor.rotation_verification_path", rotation_verification_path
+            )
     if decode_reason_code is not None:
         mcp_metrics.add_counter(
             "pagination.cursor.decode_failures_total",
@@ -728,6 +751,14 @@ def _record_cursor_secret_observability(metadata: dict[str, Any] | None) -> None
             attributes={
                 "tool_name": TOOL_NAME,
                 "reason_code": decode_reason_code,
+            },
+        )
+    if rotation_verification_path == "secondary":
+        mcp_metrics.add_counter(
+            "pagination.cursor.secondary_key_verifications_total",
+            description="Count of pagination cursor decodes verified with a non-active key",
+            attributes={
+                "tool_name": TOOL_NAME,
             },
         )
 
@@ -885,6 +916,15 @@ def _normalize_cursor_migration_outcome(raw_value: Any) -> str | None:
     return None
 
 
+def _normalize_cursor_rotation_verification_path(raw_value: Any) -> str | None:
+    if not isinstance(raw_value, str):
+        return None
+    normalized = raw_value.strip().lower()
+    if normalized in _CURSOR_ROTATION_VERIFICATION_PATH_ALLOWLIST:
+        return normalized
+    return None
+
+
 def _normalize_cursor_version(raw_value: Any) -> int | None:
     if isinstance(raw_value, bool):
         return None
@@ -974,6 +1014,21 @@ def _apply_cursor_decode_metadata(
         envelope_metadata["pagination.cursor.replay_detected"] = bool(
             metadata.get("replay_detected")
         )
+    if "kid_present" in metadata:
+        envelope_metadata["pagination.cursor.kid_present"] = bool(metadata.get("kid_present"))
+    if "kid_active_match" in metadata and metadata.get("kid_active_match") is not None:
+        envelope_metadata["pagination.cursor.kid_active_match"] = bool(
+            metadata.get("kid_active_match")
+        )
+    rotation_verification_path = _normalize_cursor_rotation_verification_path(
+        metadata.get("rotation_verification_path")
+    )
+    if rotation_verification_path is None and fallback_reason_code is not None:
+        rotation_verification_path = "error"
+    if rotation_verification_path is not None:
+        envelope_metadata["pagination.cursor.rotation_verification_path"] = (
+            rotation_verification_path
+        )
     if "migration_attempted" in metadata:
         envelope_metadata["pagination.cursor.migration_attempted"] = bool(
             metadata.get("migration_attempted")
@@ -1008,6 +1063,11 @@ def _apply_cursor_decode_metadata(
         envelope_metadata.setdefault("cursor_issued_at_present", False)
     if fallback_reason_code == PAGINATION_CURSOR_REPLAY_DETECTED:
         envelope_metadata["pagination.cursor.replay_detected"] = True
+    if fallback_reason_code == PAGINATION_CURSOR_KID_MISSING:
+        envelope_metadata["pagination.cursor.kid_present"] = False
+    if fallback_reason_code == PAGINATION_CURSOR_KID_UNKNOWN:
+        envelope_metadata["pagination.cursor.kid_present"] = True
+        envelope_metadata["pagination.cursor.kid_active_match"] = False
     if fallback_reason_code == PAGINATION_CURSOR_SCOPE_MISSING:
         envelope_metadata["pagination.cursor.scope_bound"] = True
         envelope_metadata.setdefault("pagination.cursor.scope_mismatch", False)
@@ -3281,6 +3341,9 @@ async def handler(
     tenant_enforcement_metadata["pagination.cursor.replay_guard_enabled"] = bool(
         cursor_replay_guard_enabled
     )
+    tenant_enforcement_metadata["pagination.cursor.kid_present"] = False
+    tenant_enforcement_metadata["pagination.cursor.kid_active_match"] = None
+    tenant_enforcement_metadata["pagination.cursor.rotation_verification_path"] = None
     if page_token is not None:
         normalized_page_token = page_token.strip()
         if not normalized_page_token:
@@ -4442,6 +4505,15 @@ async def handler(
                 ),
                 "pagination.cursor.replay_guard_enabled": tenant_enforcement_metadata.get(
                     "pagination.cursor.replay_guard_enabled"
+                ),
+                "pagination.cursor.kid_present": tenant_enforcement_metadata.get(
+                    "pagination.cursor.kid_present"
+                ),
+                "pagination.cursor.kid_active_match": tenant_enforcement_metadata.get(
+                    "pagination.cursor.kid_active_match"
+                ),
+                "pagination.cursor.rotation_verification_path": tenant_enforcement_metadata.get(
+                    "pagination.cursor.rotation_verification_path"
                 ),
                 "pagination.cursor.decode_reason_code": tenant_enforcement_metadata.get(
                     "pagination.cursor.decode_reason_code"
