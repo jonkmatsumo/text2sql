@@ -22,6 +22,7 @@ from mcp_server.tools.execute_sql_query import handler as mcp_execute_sql_query_
 pytestmark = pytest.mark.pagination
 
 _TEST_SECRET = "test-pagination-secret-for-unit-tests-2026"
+_PREVIOUS_SECRET = "test-pagination-secret-for-unit-tests-2025"
 _TEST_SCOPE_FP = "abcdeffedcba0123"
 _BUDGET_SNAPSHOT = {
     "max_total_rows": 1000,
@@ -158,6 +159,8 @@ def _tamper_keyset_cursor(
     raw_ttl_ms: object | None = None,
     issued_at: int | None = None,
     max_age_s: int | None = None,
+    kid: str | None = None,
+    drop_kid: bool = False,
     secret: str = _TEST_SECRET,
 ) -> str:
     """Mutate keyset cursor payload fields and re-sign for regression coverage."""
@@ -181,6 +184,10 @@ def _tamper_keyset_cursor(
         payload["issued_at"] = issued_at
     if max_age_s is not None:
         payload["max_age_s"] = max_age_s
+    if kid is not None:
+        payload["kid"] = kid
+    if drop_kid:
+        payload.pop("kid", None)
     if secret:
         sig_data = json.dumps(payload, sort_keys=True)
         payload["s"] = _hmac.new(secret.encode(), sig_data.encode(), hashlib.sha256).hexdigest()
@@ -524,6 +531,128 @@ async def test_cursor_scope_mismatch_classification_parity_between_mcp_and_agent
         mcp_result = await _invoke_mcp_federated_keyset(caps, keyset_cursor=cursor)
 
     await _assert_agent_reason_parity(mcp_result, "PAGINATION_CURSOR_SCOPE_MISMATCH")
+
+
+@pytest.mark.asyncio
+async def test_cursor_kid_missing_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for missing cursor kid metadata."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    page_one = await _invoke_mcp_federated_keyset(caps)
+    assert "error" not in page_one
+    cursor = page_one["metadata"]["next_keyset_cursor"]
+    assert cursor
+
+    missing_kid_cursor = _tamper_keyset_cursor(cursor, drop_kid=True)
+    mcp_result = await _invoke_mcp_federated_keyset(caps, keyset_cursor=missing_kid_cursor)
+    await _assert_agent_reason_parity(mcp_result, "PAGINATION_CURSOR_KID_MISSING")
+
+
+@pytest.mark.asyncio
+async def test_cursor_kid_unknown_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for unknown/retired cursor kid values."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    page_one = await _invoke_mcp_federated_keyset(caps)
+    assert "error" not in page_one
+    cursor = page_one["metadata"]["next_keyset_cursor"]
+    assert cursor
+
+    unknown_kid_cursor = _tamper_keyset_cursor(cursor, kid="unknown", secret=_TEST_SECRET)
+    mcp_result = await _invoke_mcp_federated_keyset(caps, keyset_cursor=unknown_kid_cursor)
+    await _assert_agent_reason_parity(mcp_result, "PAGINATION_CURSOR_KID_UNKNOWN")
+
+
+@pytest.mark.asyncio
+async def test_cursor_signature_invalid_known_kid_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for signature failures under a known kid."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    page_one = await _invoke_mcp_federated_keyset(caps)
+    assert "error" not in page_one
+    cursor = page_one["metadata"]["next_keyset_cursor"]
+    assert cursor
+
+    bad_signature_cursor = _tamper_keyset_cursor(cursor, secret="wrong-signing-secret-2026")
+    mcp_result = await _invoke_mcp_federated_keyset(caps, keyset_cursor=bad_signature_cursor)
+    await _assert_agent_reason_parity(mcp_result, "PAGINATION_CURSOR_SIGNATURE_INVALID")
+
+
+@pytest.mark.asyncio
+async def test_cursor_keyring_invalid_classification_parity_between_mcp_and_agent(monkeypatch):
+    """Agent must preserve MCP classification when keyring config is invalid."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    monkeypatch.setenv("PAGINATION_CURSOR_SIGNING_ACTIVE_KID", "active")
+    monkeypatch.setenv(
+        "PAGINATION_CURSOR_SIGNING_KEYS_JSON", json.dumps({"previous": _PREVIOUS_SECRET})
+    )
+
+    mcp_result = await _invoke_mcp_federated_keyset(caps, keyset_cursor="opaque-cursor")
+    await _assert_agent_reason_parity(mcp_result, "PAGINATION_CURSOR_KEYRING_INVALID")
+
+
+@pytest.mark.asyncio
+async def test_cursor_retired_key_classification_parity_between_mcp_and_agent(monkeypatch):
+    """Agent must preserve MCP classification when a previously allowed key is retired."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    monkeypatch.setenv("PAGINATION_CURSOR_SIGNING_ACTIVE_KID", "active")
+    monkeypatch.setenv(
+        "PAGINATION_CURSOR_SIGNING_KEYS_JSON",
+        json.dumps({"active": _TEST_SECRET, "previous": _PREVIOUS_SECRET}),
+    )
+
+    page_one = await _invoke_mcp_federated_keyset(caps)
+    assert "error" not in page_one
+    cursor = page_one["metadata"]["next_keyset_cursor"]
+    assert cursor
+
+    previous_cursor = _tamper_keyset_cursor(cursor, kid="previous", secret=_PREVIOUS_SECRET)
+    page_two = await _invoke_mcp_federated_keyset(caps, keyset_cursor=previous_cursor)
+    assert "error" not in page_two
+
+    monkeypatch.setenv(
+        "PAGINATION_CURSOR_SIGNING_KEYS_JSON",
+        json.dumps({"active": _TEST_SECRET}),
+    )
+    mcp_result = await _invoke_mcp_federated_keyset(caps, keyset_cursor=previous_cursor)
+    await _assert_agent_reason_parity(mcp_result, "PAGINATION_CURSOR_KID_UNKNOWN")
 
 
 @pytest.mark.asyncio

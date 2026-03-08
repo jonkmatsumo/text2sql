@@ -62,6 +62,9 @@ from dal.pagination_cursor import (
     MAX_CURSOR_TTL_MS,
     PAGINATION_CURSOR_CLOCK_SKEW,
     PAGINATION_CURSOR_EXPIRED,
+    PAGINATION_CURSOR_KEYRING_INVALID,
+    PAGINATION_CURSOR_KID_MISSING,
+    PAGINATION_CURSOR_KID_UNKNOWN,
     PAGINATION_CURSOR_KIND_UNSUPPORTED,
     PAGINATION_CURSOR_MIGRATION_PATH_MISSING,
     PAGINATION_CURSOR_MIGRATION_UNSAFE,
@@ -73,7 +76,7 @@ from dal.pagination_cursor import (
     PAGINATION_CURSOR_TTL_INVALID,
     PAGINATION_CURSOR_TTL_MISSING,
     PAGINATION_CURSOR_VERSION_UNSUPPORTED,
-    CursorSigningSecrets,
+    CursorSigningKeyring,
     build_cursor_scope_fingerprint,
 )
 from dal.postgres_sandbox import (
@@ -172,8 +175,11 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "PAGINATION_CURSOR_QUERY_MISMATCH",
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
+    PAGINATION_CURSOR_KID_MISSING,
+    PAGINATION_CURSOR_KID_UNKNOWN,
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
+    PAGINATION_CURSOR_KEYRING_INVALID,
     "PAGINATION_CURSOR_SIGNATURE_INVALID",
     PAGINATION_CURSOR_VERSION_UNSUPPORTED,
     PAGINATION_CURSOR_KIND_UNSUPPORTED,
@@ -238,6 +244,7 @@ _CURSOR_AGE_BUCKET_ALLOWLIST = {
     "3600_plus",
 }
 _CURSOR_MIGRATION_OUTCOME_ALLOWLIST = {"not_needed", "migrated", "rejected"}
+_CURSOR_ROTATION_VERIFICATION_PATH_ALLOWLIST = {"active", "secondary", "error"}
 _CURSOR_DECODE_REASON_CODE_ALLOWLIST = {
     "execution_pagination_page_token_invalid",
     "execution_pagination_page_token_too_long",
@@ -258,6 +265,9 @@ _CURSOR_DECODE_REASON_CODE_ALLOWLIST = {
     "PAGINATION_CURSOR_QUERY_MISMATCH",
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
+    PAGINATION_CURSOR_KID_MISSING,
+    PAGINATION_CURSOR_KID_UNKNOWN,
+    PAGINATION_CURSOR_KEYRING_INVALID,
     "PAGINATION_CURSOR_SIGNATURE_INVALID",
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
@@ -271,6 +281,7 @@ _CURSOR_DECODE_REASON_CODE_ALLOWLIST = {
 _CURSOR_SECRET_MISCONFIG_REASON_ALLOWLIST = {
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
+    PAGINATION_CURSOR_KEYRING_INVALID,
 }
 _CURSOR_SCOPE_BINDING_REASON_ALLOWLIST = {
     PAGINATION_CURSOR_SCOPE_MISSING,
@@ -610,6 +621,9 @@ def _cursor_secret_observability_fields(
     str | None,
     int | None,
     int | None,
+    bool,
+    bool | None,
+    str | None,
 ]:
     cursor_metadata = metadata if isinstance(metadata, dict) else {}
     secret_configured = cursor_metadata.get("pagination.cursor.secret_configured")
@@ -635,6 +649,12 @@ def _cursor_secret_observability_fields(
     current_version = _normalize_cursor_version(
         cursor_metadata.get("pagination.cursor.current_version")
     )
+    kid_present = bool(cursor_metadata.get("pagination.cursor.kid_present"))
+    kid_active_match_raw = cursor_metadata.get("pagination.cursor.kid_active_match")
+    kid_active_match = bool(kid_active_match_raw) if kid_active_match_raw is not None else None
+    rotation_verification_path = _normalize_cursor_rotation_verification_path(
+        cursor_metadata.get("pagination.cursor.rotation_verification_path")
+    )
     return (
         bool(secret_configured),
         bool(secret_valid),
@@ -648,6 +668,9 @@ def _cursor_secret_observability_fields(
         migration_outcome,
         original_version,
         current_version,
+        kid_present,
+        kid_active_match,
+        rotation_verification_path,
     )
 
 
@@ -665,6 +688,9 @@ def _record_cursor_secret_observability(metadata: dict[str, Any] | None) -> None
         migration_outcome,
         original_version,
         current_version,
+        kid_present,
+        kid_active_match,
+        rotation_verification_path,
     ) = _cursor_secret_observability_fields(metadata)
     span = trace.get_current_span()
     if span is not None and span.is_recording():
@@ -685,6 +711,13 @@ def _record_cursor_secret_observability(metadata: dict[str, Any] | None) -> None
             span.set_attribute("pagination.cursor.original_version", original_version)
         if current_version is not None:
             span.set_attribute("pagination.cursor.current_version", current_version)
+        span.set_attribute("pagination.cursor.kid_present", kid_present)
+        if kid_active_match is not None:
+            span.set_attribute("pagination.cursor.kid_active_match", kid_active_match)
+        if rotation_verification_path is not None:
+            span.set_attribute(
+                "pagination.cursor.rotation_verification_path", rotation_verification_path
+            )
     if decode_reason_code is not None:
         mcp_metrics.add_counter(
             "pagination.cursor.decode_failures_total",
@@ -718,6 +751,14 @@ def _record_cursor_secret_observability(metadata: dict[str, Any] | None) -> None
             attributes={
                 "tool_name": TOOL_NAME,
                 "reason_code": decode_reason_code,
+            },
+        )
+    if rotation_verification_path == "secondary":
+        mcp_metrics.add_counter(
+            "pagination.cursor.secondary_key_verifications_total",
+            description="Count of pagination cursor decodes verified with a non-active key",
+            attributes={
+                "tool_name": TOOL_NAME,
             },
         )
 
@@ -875,6 +916,15 @@ def _normalize_cursor_migration_outcome(raw_value: Any) -> str | None:
     return None
 
 
+def _normalize_cursor_rotation_verification_path(raw_value: Any) -> str | None:
+    if not isinstance(raw_value, str):
+        return None
+    normalized = raw_value.strip().lower()
+    if normalized in _CURSOR_ROTATION_VERIFICATION_PATH_ALLOWLIST:
+        return normalized
+    return None
+
+
 def _normalize_cursor_version(raw_value: Any) -> int | None:
     if isinstance(raw_value, bool):
         return None
@@ -909,6 +959,9 @@ def _cursor_validation_outcome_from_reason_code(reason_code: Any) -> str | None:
         "PAGINATION_CURSOR_QUERY_MISMATCH": "QUERY_MISMATCH",
         "PAGINATION_CURSOR_SCOPE_MISSING": "SCOPE_MISSING",
         "PAGINATION_CURSOR_SCOPE_MISMATCH": "SCOPE_MISMATCH",
+        PAGINATION_CURSOR_KID_MISSING: "INVALID",
+        PAGINATION_CURSOR_KID_UNKNOWN: "INVALID",
+        PAGINATION_CURSOR_KEYRING_INVALID: "INVALID",
         "PAGINATION_CURSOR_SIGNATURE_INVALID": "SIGNATURE_INVALID",
         "PAGINATION_CURSOR_SECRET_MISSING": "SECRET_MISSING",
         "PAGINATION_CURSOR_SECRET_WEAK": "SECRET_WEAK",
@@ -961,6 +1014,21 @@ def _apply_cursor_decode_metadata(
         envelope_metadata["pagination.cursor.replay_detected"] = bool(
             metadata.get("replay_detected")
         )
+    if "kid_present" in metadata:
+        envelope_metadata["pagination.cursor.kid_present"] = bool(metadata.get("kid_present"))
+    if "kid_active_match" in metadata and metadata.get("kid_active_match") is not None:
+        envelope_metadata["pagination.cursor.kid_active_match"] = bool(
+            metadata.get("kid_active_match")
+        )
+    rotation_verification_path = _normalize_cursor_rotation_verification_path(
+        metadata.get("rotation_verification_path")
+    )
+    if rotation_verification_path is None and fallback_reason_code is not None:
+        rotation_verification_path = "error"
+    if rotation_verification_path is not None:
+        envelope_metadata["pagination.cursor.rotation_verification_path"] = (
+            rotation_verification_path
+        )
     if "migration_attempted" in metadata:
         envelope_metadata["pagination.cursor.migration_attempted"] = bool(
             metadata.get("migration_attempted")
@@ -995,6 +1063,11 @@ def _apply_cursor_decode_metadata(
         envelope_metadata.setdefault("cursor_issued_at_present", False)
     if fallback_reason_code == PAGINATION_CURSOR_REPLAY_DETECTED:
         envelope_metadata["pagination.cursor.replay_detected"] = True
+    if fallback_reason_code == PAGINATION_CURSOR_KID_MISSING:
+        envelope_metadata["pagination.cursor.kid_present"] = False
+    if fallback_reason_code == PAGINATION_CURSOR_KID_UNKNOWN:
+        envelope_metadata["pagination.cursor.kid_present"] = True
+        envelope_metadata["pagination.cursor.kid_active_match"] = False
     if fallback_reason_code == PAGINATION_CURSOR_SCOPE_MISSING:
         envelope_metadata["pagination.cursor.scope_bound"] = True
         envelope_metadata.setdefault("pagination.cursor.scope_mismatch", False)
@@ -3247,23 +3320,30 @@ async def handler(
             or _DEFAULT_PAGINATION_MAX_OFFSET_PAGES
         ),
     )
-    cursor_signing_secrets = CursorSigningSecrets.from_env()
-    pagination_token_secret = cursor_signing_secrets.secret
-    _pagination_signing_available = cursor_signing_secrets.valid
-    pagination_secret_failure_reason_code = cursor_signing_secrets.reason_code
+    cursor_signing_keyring = CursorSigningKeyring.from_env()
+    pagination_token_secret = None
+    if cursor_signing_keyring.valid and cursor_signing_keyring.active_kid is not None:
+        pagination_token_secret = cursor_signing_keyring.keys.get(cursor_signing_keyring.active_kid)
+    _pagination_signing_available = (
+        cursor_signing_keyring.valid and pagination_token_secret is not None
+    )
+    pagination_secret_failure_reason_code = cursor_signing_keyring.reason_code
     tenant_enforcement_metadata["pagination.cursor.signing_secret_configured"] = (
-        cursor_signing_secrets.configured
+        cursor_signing_keyring.configured
     )
     tenant_enforcement_metadata["pagination.cursor.secret_configured"] = (
-        cursor_signing_secrets.configured
+        cursor_signing_keyring.configured
     )
-    tenant_enforcement_metadata["pagination.cursor.secret_valid"] = cursor_signing_secrets.valid
+    tenant_enforcement_metadata["pagination.cursor.secret_valid"] = cursor_signing_keyring.valid
     tenant_enforcement_metadata["pagination.cursor.ttl_enabled"] = bool(cursor_ttl_ms > 0)
     tenant_enforcement_metadata["pagination.cursor.scope_bound"] = False
     tenant_enforcement_metadata["pagination.cursor.scope_mismatch"] = False
     tenant_enforcement_metadata["pagination.cursor.replay_guard_enabled"] = bool(
         cursor_replay_guard_enabled
     )
+    tenant_enforcement_metadata["pagination.cursor.kid_present"] = False
+    tenant_enforcement_metadata["pagination.cursor.kid_active_match"] = None
+    tenant_enforcement_metadata["pagination.cursor.rotation_verification_path"] = None
     if page_token is not None:
         normalized_page_token = page_token.strip()
         if not normalized_page_token:
@@ -3579,6 +3659,7 @@ async def handler(
                         keyset_values = decode_keyset_cursor(
                             keyset_cursor,
                             expected_fingerprint=query_fingerprint,
+                            signing_keyring=cursor_signing_keyring,
                             secret=pagination_token_secret,
                             expected_keys=keyset_order_signature,
                             expected_cursor_context=expected_cursor_context or None,
@@ -3648,6 +3729,12 @@ async def handler(
                         elif PAGINATION_CURSOR_SCOPE_MISMATCH in str(e):
                             reason_code = PAGINATION_CURSOR_SCOPE_MISMATCH
                             tenant_enforcement_metadata["pagination.cursor.scope_mismatch"] = True
+                        elif PAGINATION_CURSOR_KID_MISSING in str(e):
+                            reason_code = PAGINATION_CURSOR_KID_MISSING
+                        elif PAGINATION_CURSOR_KID_UNKNOWN in str(e):
+                            reason_code = PAGINATION_CURSOR_KID_UNKNOWN
+                        elif PAGINATION_CURSOR_KEYRING_INVALID in str(e):
+                            reason_code = PAGINATION_CURSOR_KEYRING_INVALID
                         elif PAGINATION_BUDGET_SNAPSHOT_INVALID in str(e):
                             reason_code = PAGINATION_BUDGET_SNAPSHOT_INVALID
                         elif PAGINATION_CURSOR_VERSION_UNSUPPORTED in str(e):
@@ -3822,6 +3909,7 @@ async def handler(
                             token=page_token,
                             expected_fingerprint=query_fingerprint,
                             max_length=max_page_token_len,
+                            signing_keyring=cursor_signing_keyring,
                             secret=pagination_token_secret or None,
                             decode_metadata=offset_decode_metadata,
                             clock_skew_ms=cursor_clock_skew_ms,
@@ -4081,6 +4169,7 @@ async def handler(
                 offset=int(offset_next_token_payload["offset"]),
                 limit=int(offset_next_token_payload["limit"]),
                 fingerprint=query_fingerprint or "",
+                signing_keyring=cursor_signing_keyring,
                 secret=pagination_token_secret or None,
                 ttl_ms=cursor_ttl_ms,
                 query_fp=(cursor_query_fingerprint if cursor_bind_query_fingerprint else None),
@@ -4160,6 +4249,7 @@ async def handler(
                     keyset_vals,
                     keyset_order_signature,
                     query_fingerprint,
+                    signing_keyring=cursor_signing_keyring,
                     secret=pagination_token_secret,
                     cursor_context=keyset_cursor_context or None,
                     ttl_ms=cursor_ttl_ms,
@@ -4415,6 +4505,15 @@ async def handler(
                 ),
                 "pagination.cursor.replay_guard_enabled": tenant_enforcement_metadata.get(
                     "pagination.cursor.replay_guard_enabled"
+                ),
+                "pagination.cursor.kid_present": tenant_enforcement_metadata.get(
+                    "pagination.cursor.kid_present"
+                ),
+                "pagination.cursor.kid_active_match": tenant_enforcement_metadata.get(
+                    "pagination.cursor.kid_active_match"
+                ),
+                "pagination.cursor.rotation_verification_path": tenant_enforcement_metadata.get(
+                    "pagination.cursor.rotation_verification_path"
                 ),
                 "pagination.cursor.decode_reason_code": tenant_enforcement_metadata.get(
                     "pagination.cursor.decode_reason_code"

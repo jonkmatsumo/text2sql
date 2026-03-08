@@ -20,19 +20,26 @@ from dal.pagination_cursor import (
     DEFAULT_CURSOR_TTL_MS,
     PAGINATION_CURSOR_CLOCK_SKEW,
     PAGINATION_CURSOR_EXPIRED,
+    PAGINATION_CURSOR_KEYRING_INVALID,
+    PAGINATION_CURSOR_KID_MISSING,
+    PAGINATION_CURSOR_KID_UNKNOWN,
     PAGINATION_CURSOR_MIGRATION_UNSAFE,
     PAGINATION_CURSOR_REPLAY_DETECTED,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
     PAGINATION_CURSOR_SCOPE_MISSING,
+    PAGINATION_CURSOR_SECRET_MISSING,
+    PAGINATION_CURSOR_SECRET_WEAK,
     PAGINATION_CURSOR_SIGNATURE_INVALID,
     PAGINATION_CURSOR_TTL_INVALID,
     PAGINATION_CURSOR_TTL_MISSING,
     CursorMigrationError,
     CursorMigrationRegistry,
+    CursorSigningKeyring,
     bounded_cursor_age_seconds,
     build_cursor_envelope,
     build_cursor_nonce,
     cursor_now_epoch_milliseconds,
+    normalize_cursor_kid,
     normalize_cursor_milliseconds,
     normalize_cursor_nonce,
     normalize_cursor_scope_fingerprint,
@@ -65,6 +72,7 @@ class OffsetPaginationToken:
     max_age_s: int | None = None
     legacy_issued_at_accepted: bool = False
     nonce: str | None = None
+    kid: str | None = None
     query_fingerprint: str | None = None
     budget_snapshot: dict[str, Any] | None = None
 
@@ -82,6 +90,7 @@ class OffsetCursorMigrationResult:
 
 _OFFSET_CURSOR_KIND = "offset"
 _OFFSET_CURSOR_CURRENT_VERSION = 1
+_OFFSET_CURSOR_DEFAULT_KID = "legacy"
 
 
 def _extract_first_present(payload: dict[str, Any], *keys: str) -> Any:
@@ -156,6 +165,7 @@ def _migrate_offset_payload_v0_to_v1(payload: dict[str, Any]) -> dict[str, Any]:
     query_fp_raw = _extract_first_present(payload, "query_fp")
     query_fp = str(query_fp_raw).strip() if isinstance(query_fp_raw, str) else ""
     scope_fp = normalize_cursor_scope_fingerprint(_extract_first_present(payload, "scope_fp"))
+    kid = normalize_cursor_kid(_extract_first_present(payload, "kid"))
 
     migrated_payload: dict[str, Any] = {
         "cursor_version": _OFFSET_CURSOR_CURRENT_VERSION,
@@ -174,6 +184,8 @@ def _migrate_offset_payload_v0_to_v1(payload: dict[str, Any]) -> dict[str, Any]:
         migrated_payload["query_fp"] = query_fp
     if scope_fp:
         migrated_payload["scope_fp"] = scope_fp
+    if kid:
+        migrated_payload["kid"] = kid
     if "budget_snapshot" in payload:
         migrated_payload["budget_snapshot"] = payload.get("budget_snapshot")
     if "budget_fp" in payload:
@@ -272,12 +284,14 @@ def encode_offset_pagination_token(
     offset: int,
     limit: int,
     fingerprint: str,
+    signing_keyring: CursorSigningKeyring | None = None,
     secret: str | None = None,
     issued_at_ms: int | None = None,
     ttl_ms: int | None = None,
     nonce: str | None = None,
     issued_at: int | None = None,
     max_age_s: int | None = None,
+    kid: str | None = None,
     now_epoch_milliseconds: int | None = None,
     now_epoch_seconds: int | None = None,
     query_fp: str | None = None,
@@ -285,6 +299,18 @@ def encode_offset_pagination_token(
     budget_snapshot: dict[str, Any] | None = None,
 ) -> str:
     """Encode a deterministic opaque pagination token."""
+    signing_secret = (secret or "").strip()
+    active_kid: str | None = None
+    if signing_keyring is not None:
+        try:
+            active_kid, signing_secret = signing_keyring.require_active_signing_key()
+        except Exception as exc:
+            reason_code = getattr(exc, "reason_code", PAGINATION_CURSOR_KEYRING_INVALID)
+            raise OffsetPaginationTokenError(
+                reason_code=reason_code,
+                message="Invalid pagination token metadata.",
+            ) from exc
+
     if now_epoch_milliseconds is None and now_epoch_seconds is not None:
         now_epoch_milliseconds = int(now_epoch_seconds) * 1000
     normalized_issued_at_ms = normalize_cursor_milliseconds(issued_at_ms)
@@ -320,6 +346,17 @@ def encode_offset_pagination_token(
         "issued_at": int(normalized_issued_at_ms) // 1000,
         "max_age_s": max(1, int(normalized_ttl_ms) // 1000),
     }
+    normalized_kid = normalize_cursor_kid(
+        active_kid
+        if active_kid is not None
+        else (kid if kid is not None else _OFFSET_CURSOR_DEFAULT_KID)
+    )
+    if normalized_kid is None:
+        raise OffsetPaginationTokenError(
+            reason_code=PAGINATION_CURSOR_KID_MISSING,
+            message="Invalid pagination token metadata.",
+        )
+    payload["kid"] = normalized_kid
     normalized_nonce = normalize_cursor_nonce(nonce) or build_cursor_nonce()
     payload["nonce"] = normalized_nonce
     normalized_query_fp = str(query_fp).strip() if isinstance(query_fp, str) else ""
@@ -334,10 +371,9 @@ def encode_offset_pagination_token(
         payload["budget_fp"] = budget_snapshot_fingerprint(normalized_budget_snapshot)
     payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     wrapper: dict[str, Any] = {"p": payload}
-    secret_value = (secret or "").strip()
-    if secret_value:
+    if signing_secret:
         signature = hmac.new(
-            secret_value.encode("utf-8"), payload_bytes, digestmod=hashlib.sha256
+            signing_secret.encode("utf-8"), payload_bytes, digestmod=hashlib.sha256
         ).hexdigest()
         wrapper["s"] = signature
     encoded = base64.urlsafe_b64encode(
@@ -351,6 +387,7 @@ def decode_offset_pagination_token(
     token: str,
     expected_fingerprint: str,
     max_length: int,
+    signing_keyring: CursorSigningKeyring | None = None,
     secret: str | None = None,
     require_issued_at: bool = True,
     decode_metadata: dict[str, Any] | None = None,
@@ -400,8 +437,44 @@ def decode_offset_pagination_token(
             reason_code="execution_pagination_page_token_malformed",
             message="Malformed pagination token payload.",
         )
+    payload_kid = normalize_cursor_kid(payload.get("kid"))
+    if isinstance(decode_metadata, dict):
+        decode_metadata["kid_present"] = payload_kid is not None
+    if payload_kid is None:
+        if isinstance(decode_metadata, dict):
+            decode_metadata["validation_outcome"] = "INVALID"
+            decode_metadata["rotation_verification_path"] = "error"
+        raise OffsetPaginationTokenError(
+            reason_code=PAGINATION_CURSOR_KID_MISSING,
+            message="Invalid pagination token metadata.",
+        )
 
     secret_value = (secret or "").strip()
+    if signing_keyring is not None:
+        try:
+            secret_value = signing_keyring.resolve_verifier_secret(payload_kid)
+            if isinstance(decode_metadata, dict):
+                kid_active_match = bool(payload_kid == signing_keyring.active_kid)
+                decode_metadata["kid_active_match"] = kid_active_match
+                decode_metadata["rotation_verification_path"] = (
+                    "active" if kid_active_match else "secondary"
+                )
+        except Exception as exc:
+            reason_code = getattr(exc, "reason_code", PAGINATION_CURSOR_KEYRING_INVALID)
+            if reason_code not in {
+                PAGINATION_CURSOR_KID_MISSING,
+                PAGINATION_CURSOR_KID_UNKNOWN,
+                PAGINATION_CURSOR_SECRET_MISSING,
+                PAGINATION_CURSOR_SECRET_WEAK,
+            }:
+                reason_code = PAGINATION_CURSOR_KEYRING_INVALID
+            if isinstance(decode_metadata, dict):
+                decode_metadata["validation_outcome"] = "INVALID"
+                decode_metadata["rotation_verification_path"] = "error"
+            raise OffsetPaginationTokenError(
+                reason_code=reason_code,
+                message="Invalid pagination token metadata.",
+            ) from exc
     signature = raw_wrapper.get("s")
     if secret_value:
         if not isinstance(signature, str) or not signature:
@@ -444,6 +517,14 @@ def decode_offset_pagination_token(
             message="Invalid pagination token metadata.",
         ) from exc
     payload = migration_result.payload
+    payload_kid = normalize_cursor_kid(payload.get("kid"))
+    if payload_kid is None:
+        if isinstance(decode_metadata, dict):
+            decode_metadata["validation_outcome"] = "INVALID"
+        raise OffsetPaginationTokenError(
+            reason_code=PAGINATION_CURSOR_KID_MISSING,
+            message="Invalid pagination token metadata.",
+        )
     if isinstance(decode_metadata, dict):
         decode_metadata["migration_attempted"] = migration_result.migration_attempted
         decode_metadata["migration_outcome"] = migration_result.migration_outcome
@@ -611,6 +692,7 @@ def decode_offset_pagination_token(
         max_age_s=ttl_ms_value // 1000,
         legacy_issued_at_accepted=False,
         nonce=nonce,
+        kid=payload_kid,
         query_fingerprint=query_fingerprint,
         budget_snapshot=normalized_budget_snapshot,
     )

@@ -21,19 +21,26 @@ from dal.pagination_cursor import (
     DEFAULT_CURSOR_TTL_MS,
     PAGINATION_CURSOR_CLOCK_SKEW,
     PAGINATION_CURSOR_EXPIRED,
+    PAGINATION_CURSOR_KEYRING_INVALID,
+    PAGINATION_CURSOR_KID_MISSING,
+    PAGINATION_CURSOR_KID_UNKNOWN,
     PAGINATION_CURSOR_MIGRATION_UNSAFE,
     PAGINATION_CURSOR_REPLAY_DETECTED,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
     PAGINATION_CURSOR_SCOPE_MISSING,
+    PAGINATION_CURSOR_SECRET_MISSING,
+    PAGINATION_CURSOR_SECRET_WEAK,
     PAGINATION_CURSOR_SIGNATURE_INVALID,
     PAGINATION_CURSOR_TTL_INVALID,
     PAGINATION_CURSOR_TTL_MISSING,
     CursorMigrationError,
     CursorMigrationRegistry,
+    CursorSigningKeyring,
     bounded_cursor_age_seconds,
     build_cursor_envelope,
     build_cursor_nonce,
     cursor_now_epoch_milliseconds,
+    normalize_cursor_kid,
     normalize_cursor_milliseconds,
     normalize_cursor_nonce,
     normalize_cursor_scope_fingerprint,
@@ -258,6 +265,7 @@ class KeysetCursorMigrationResult:
 
 _KEYSET_CURSOR_KIND = "keyset"
 _KEYSET_CURSOR_CURRENT_VERSION = 1
+_KEYSET_CURSOR_DEFAULT_KID = "legacy"
 
 
 def _extract_first_present(payload: Dict[str, Any], *keys: str) -> Any:
@@ -347,6 +355,7 @@ def _migrate_keyset_payload_v0_to_v1(payload: Dict[str, Any]) -> Dict[str, Any]:
     query_fp_raw = _extract_first_present(payload, "query_fp")
     query_fp = str(query_fp_raw).strip() if isinstance(query_fp_raw, str) else ""
     scope_fp = normalize_cursor_scope_fingerprint(_extract_first_present(payload, "scope_fp"))
+    kid = normalize_cursor_kid(_extract_first_present(payload, "kid"))
     cursor_context = _normalize_cursor_context(
         _extract_first_present(payload, "c", "cursor_context")
     )
@@ -367,6 +376,8 @@ def _migrate_keyset_payload_v0_to_v1(payload: Dict[str, Any]) -> Dict[str, Any]:
         migrated_payload["query_fp"] = query_fp
     if scope_fp:
         migrated_payload["scope_fp"] = scope_fp
+    if kid:
+        migrated_payload["kid"] = kid
     if cursor_context:
         migrated_payload["c"] = cursor_context
     if "budget_snapshot" in payload:
@@ -413,6 +424,7 @@ def encode_keyset_cursor(
     values: List[Any],
     keys: List[str],
     fingerprint: str,
+    signing_keyring: CursorSigningKeyring | None = None,
     secret: Optional[str] = None,
     cursor_context: Optional[Dict[str, str]] = None,
     issued_at_ms: int | None = None,
@@ -420,6 +432,7 @@ def encode_keyset_cursor(
     nonce: str | None = None,
     issued_at: int | None = None,
     max_age_s: int | None = None,
+    kid: str | None = None,
     now_epoch_milliseconds: int | None = None,
     now_epoch_seconds: int | None = None,
     query_fp: str | None = None,
@@ -427,6 +440,20 @@ def encode_keyset_cursor(
     budget_snapshot: Dict[str, Any] | None = None,
 ) -> str:
     """Encode keyset values and keys into an opaque base64 cursor."""
+    signing_secret = (secret or "").strip()
+    active_kid: str | None = None
+    if signing_keyring is not None:
+        try:
+            active_kid, signing_secret = signing_keyring.require_active_signing_key()
+        except Exception as exc:
+            reason_code = getattr(exc, "reason_code", PAGINATION_CURSOR_KEYRING_INVALID)
+            if reason_code not in {
+                PAGINATION_CURSOR_SECRET_MISSING,
+                PAGINATION_CURSOR_SECRET_WEAK,
+            }:
+                reason_code = PAGINATION_CURSOR_KEYRING_INVALID
+            raise ValueError(f"Invalid cursor: {reason_code}.") from exc
+
     if now_epoch_milliseconds is None and now_epoch_seconds is not None:
         now_epoch_milliseconds = int(now_epoch_seconds) * 1000
     normalized_issued_at_ms = normalize_cursor_milliseconds(issued_at_ms)
@@ -459,6 +486,14 @@ def encode_keyset_cursor(
         "issued_at": int(normalized_issued_at_ms) // 1000,
         "max_age_s": max(1, int(normalized_ttl_ms) // 1000),
     }
+    normalized_kid = normalize_cursor_kid(
+        active_kid
+        if active_kid is not None
+        else (kid if kid is not None else _KEYSET_CURSOR_DEFAULT_KID)
+    )
+    if normalized_kid is None:
+        raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_KID_MISSING}.")
+    payload["kid"] = normalized_kid
     payload["nonce"] = normalize_cursor_nonce(nonce) or build_cursor_nonce()
     normalized_query_fp = str(query_fp).strip() if isinstance(query_fp, str) else ""
     if normalized_query_fp:
@@ -473,8 +508,8 @@ def encode_keyset_cursor(
         normalized_budget_snapshot = ExecutionBudget.from_snapshot(budget_snapshot).to_snapshot()
         payload["budget_snapshot"] = normalized_budget_snapshot
         payload["budget_fp"] = budget_snapshot_fingerprint(normalized_budget_snapshot)
-    if secret:
-        payload["s"] = _calculate_signature(payload, secret)
+    if signing_secret:
+        payload["s"] = _calculate_signature(payload, signing_secret)
 
     json_data = json.dumps(payload, sort_keys=True)
     return base64.urlsafe_b64encode(json_data.encode()).decode().rstrip("=")
@@ -483,6 +518,7 @@ def encode_keyset_cursor(
 def decode_keyset_cursor(
     cursor: str,
     expected_fingerprint: str,
+    signing_keyring: CursorSigningKeyring | None = None,
     secret: Optional[str] = None,
     expected_keys: Optional[List[str]] = None,
     expected_cursor_context: Optional[Dict[str, str]] = None,
@@ -509,12 +545,44 @@ def decode_keyset_cursor(
 
         json_data = base64.urlsafe_b64decode(cursor).decode()
         payload = json.loads(json_data)
+        payload_kid = normalize_cursor_kid(payload.get("kid"))
+        if isinstance(decode_metadata, dict):
+            decode_metadata["kid_present"] = payload_kid is not None
+        if payload_kid is None:
+            if isinstance(decode_metadata, dict):
+                decode_metadata["validation_outcome"] = "INVALID"
+                decode_metadata["rotation_verification_path"] = "error"
+            raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_KID_MISSING}.")
 
-        if secret:
+        verifier_secret = (secret or "").strip()
+        if signing_keyring is not None:
+            try:
+                verifier_secret = signing_keyring.resolve_verifier_secret(payload_kid)
+                if isinstance(decode_metadata, dict):
+                    kid_active_match = bool(payload_kid == signing_keyring.active_kid)
+                    decode_metadata["kid_active_match"] = kid_active_match
+                    decode_metadata["rotation_verification_path"] = (
+                        "active" if kid_active_match else "secondary"
+                    )
+            except Exception as exc:
+                reason_code = getattr(exc, "reason_code", PAGINATION_CURSOR_KEYRING_INVALID)
+                if reason_code not in {
+                    PAGINATION_CURSOR_KID_MISSING,
+                    PAGINATION_CURSOR_KID_UNKNOWN,
+                    PAGINATION_CURSOR_SECRET_MISSING,
+                    PAGINATION_CURSOR_SECRET_WEAK,
+                }:
+                    reason_code = PAGINATION_CURSOR_KEYRING_INVALID
+                if isinstance(decode_metadata, dict):
+                    decode_metadata["validation_outcome"] = "INVALID"
+                    decode_metadata["rotation_verification_path"] = "error"
+                raise ValueError(f"Invalid cursor: {reason_code}.") from exc
+
+        if verifier_secret:
             stored_sig = payload.get("s")
             payload_for_sig = {k: v for k, v in payload.items() if k != "s"}
             if not stored_sig or not hmac.compare_digest(
-                stored_sig, _calculate_signature(payload_for_sig, secret)
+                stored_sig, _calculate_signature(payload_for_sig, verifier_secret)
             ):
                 if isinstance(decode_metadata, dict):
                     decode_metadata["validation_outcome"] = "SIGNATURE_INVALID"
@@ -538,6 +606,11 @@ def decode_keyset_cursor(
                 decode_metadata["validation_outcome"] = "INVALID"
             raise ValueError(f"Invalid cursor: {exc.reason_code}.") from exc
         payload = migration_result.payload
+        payload_kid = normalize_cursor_kid(payload.get("kid"))
+        if payload_kid is None:
+            if isinstance(decode_metadata, dict):
+                decode_metadata["validation_outcome"] = "INVALID"
+            raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_KID_MISSING}.")
         if isinstance(decode_metadata, dict):
             decode_metadata["migration_attempted"] = migration_result.migration_attempted
             decode_metadata["migration_outcome"] = migration_result.migration_outcome

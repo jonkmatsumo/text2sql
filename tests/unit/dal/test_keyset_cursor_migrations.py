@@ -31,6 +31,7 @@ def test_keyset_legacy_v0_cursor_migrates_and_decodes() -> None:
             "f": "fp-keyset-v0",
             "issued_at": 1_700_000_000,
             "max_age_s": 300,
+            "kid": "legacy",
         }
     )
 
@@ -52,6 +53,7 @@ def test_keyset_legacy_v0_cursor_missing_order_signature_fails_closed() -> None:
             "f": "fp-keyset-v0",
             "issued_at": 1_700_000_000,
             "max_age_s": 300,
+            "kid": "legacy",
         }
     )
 
@@ -73,6 +75,7 @@ def test_keyset_migrated_legacy_cursor_stays_bound_to_order_signature() -> None:
             "f": "fp-keyset-v0",
             "issued_at": 1_700_000_000,
             "max_age_s": 300,
+            "kid": "legacy",
         }
     )
 

@@ -105,6 +105,7 @@ def test_offset_decode_rejects_missing_ttl_metadata_fail_closed():
             "o": 1,
             "l": 2,
             "f": "fp1",
+            "kid": "legacy",
         }
     }
     token = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
@@ -128,6 +129,7 @@ def test_keyset_decode_rejects_missing_ttl_metadata_fail_closed():
         "v": [1],
         "k": ["id|asc|nulls_last"],
         "f": "fp1",
+        "kid": "legacy",
     }
     cursor = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
     with pytest.raises(ValueError, match="PAGINATION_CURSOR_TTL_MISSING"):
