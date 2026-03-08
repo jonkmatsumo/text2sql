@@ -176,3 +176,66 @@ def test_keyring_size_is_bounded_fail_closed(monkeypatch) -> None:
     resolved = CursorSigningKeyring.from_env()
     assert resolved.valid is False
     assert resolved.reason_code == PAGINATION_CURSOR_KEYRING_INVALID
+
+
+def test_removed_key_is_rejected_after_rotation_window_for_offset_and_keyset() -> None:
+    """Removing a previous key should retire existing cursors for both pagination modes."""
+    active_and_previous = _rotation_keyring()
+    active_only = CursorSigningKeyring(
+        active_kid="active",
+        keys={"active": _ACTIVE_SECRET},
+        configured=True,
+        valid=True,
+        reason_code=None,
+        source_env_var="PAGINATION_CURSOR_SIGNING_KEYS_JSON",
+    )
+
+    previous_offset_token = encode_offset_pagination_token(
+        offset=11,
+        limit=4,
+        fingerprint="fp-offset-retired",
+        secret=_PREVIOUS_SECRET,
+        kid="previous",
+    )
+    previous_keyset_cursor = encode_keyset_cursor(
+        [11],
+        ["id|asc|nulls_last"],
+        "fp-keyset-retired",
+        secret=_PREVIOUS_SECRET,
+        kid="previous",
+    )
+
+    # During rotation window, both cursors still decode via the secondary key.
+    assert (
+        decode_offset_pagination_token(
+            token=previous_offset_token,
+            expected_fingerprint="fp-offset-retired",
+            max_length=2048,
+            signing_keyring=active_and_previous,
+        ).offset
+        == 11
+    )
+    assert decode_keyset_cursor(
+        previous_keyset_cursor,
+        expected_fingerprint="fp-keyset-retired",
+        expected_keys=["id|asc|nulls_last"],
+        signing_keyring=active_and_previous,
+    ) == [11]
+
+    # After retirement (previous key removed), both fail closed with KID_UNKNOWN.
+    with pytest.raises(OffsetPaginationTokenError) as offset_exc:
+        decode_offset_pagination_token(
+            token=previous_offset_token,
+            expected_fingerprint="fp-offset-retired",
+            max_length=2048,
+            signing_keyring=active_only,
+        )
+    assert offset_exc.value.reason_code == PAGINATION_CURSOR_KID_UNKNOWN
+
+    with pytest.raises(ValueError, match=PAGINATION_CURSOR_KID_UNKNOWN):
+        decode_keyset_cursor(
+            previous_keyset_cursor,
+            expected_fingerprint="fp-keyset-retired",
+            expected_keys=["id|asc|nulls_last"],
+            signing_keyring=active_only,
+        )
