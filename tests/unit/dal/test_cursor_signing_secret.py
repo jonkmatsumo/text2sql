@@ -5,12 +5,12 @@ from __future__ import annotations
 import pytest
 
 from dal.pagination_cursor import (
-    PAGINATION_CURSOR_KID_MISSING,
+    PAGINATION_CURSOR_KEYRING_INVALID,
     PAGINATION_CURSOR_MIN_SECRET_BYTES,
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
     CursorSigningKeyConfig,
-    CursorSigningKidMissing,
+    CursorSigningKeyringInvalid,
     CursorSigningSecretMissing,
     CursorSigningSecrets,
     CursorSigningSecretWeak,
@@ -150,12 +150,12 @@ def test_key_config_resolves_active_kid_and_keyring_json_presence(monkeypatch):
 
 
 def test_resolver_fails_closed_when_active_kid_is_invalid(monkeypatch):
-    """Invalid active kid should fail closed with PAGINATION_CURSOR_KID_MISSING."""
+    """Invalid active kid should fail closed with PAGINATION_CURSOR_KEYRING_INVALID."""
     monkeypatch.setenv("PAGINATION_CURSOR_HMAC_SECRET", _STRONG_SECRET)
     monkeypatch.setenv("PAGINATION_CURSOR_SIGNING_ACTIVE_KID", "INVALID KID")
     resolved = CursorSigningSecrets.from_env()
     assert resolved.valid is False
-    assert resolved.reason_code == PAGINATION_CURSOR_KID_MISSING
-    with pytest.raises(CursorSigningKidMissing) as exc_info:
+    assert resolved.reason_code == PAGINATION_CURSOR_KEYRING_INVALID
+    with pytest.raises(CursorSigningKeyringInvalid) as exc_info:
         resolved.require_active_signing_key()
-    assert exc_info.value.reason_code == PAGINATION_CURSOR_KID_MISSING
+    assert exc_info.value.reason_code == PAGINATION_CURSOR_KEYRING_INVALID

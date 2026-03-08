@@ -62,7 +62,9 @@ from dal.pagination_cursor import (
     MAX_CURSOR_TTL_MS,
     PAGINATION_CURSOR_CLOCK_SKEW,
     PAGINATION_CURSOR_EXPIRED,
+    PAGINATION_CURSOR_KEYRING_INVALID,
     PAGINATION_CURSOR_KID_MISSING,
+    PAGINATION_CURSOR_KID_UNKNOWN,
     PAGINATION_CURSOR_KIND_UNSUPPORTED,
     PAGINATION_CURSOR_MIGRATION_PATH_MISSING,
     PAGINATION_CURSOR_MIGRATION_UNSAFE,
@@ -74,7 +76,7 @@ from dal.pagination_cursor import (
     PAGINATION_CURSOR_TTL_INVALID,
     PAGINATION_CURSOR_TTL_MISSING,
     PAGINATION_CURSOR_VERSION_UNSUPPORTED,
-    CursorSigningSecrets,
+    CursorSigningKeyring,
     build_cursor_scope_fingerprint,
 )
 from dal.postgres_sandbox import (
@@ -174,8 +176,10 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
     PAGINATION_CURSOR_KID_MISSING,
+    PAGINATION_CURSOR_KID_UNKNOWN,
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
+    PAGINATION_CURSOR_KEYRING_INVALID,
     "PAGINATION_CURSOR_SIGNATURE_INVALID",
     PAGINATION_CURSOR_VERSION_UNSUPPORTED,
     PAGINATION_CURSOR_KIND_UNSUPPORTED,
@@ -261,6 +265,8 @@ _CURSOR_DECODE_REASON_CODE_ALLOWLIST = {
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
     PAGINATION_CURSOR_KID_MISSING,
+    PAGINATION_CURSOR_KID_UNKNOWN,
+    PAGINATION_CURSOR_KEYRING_INVALID,
     "PAGINATION_CURSOR_SIGNATURE_INVALID",
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
@@ -274,6 +280,7 @@ _CURSOR_DECODE_REASON_CODE_ALLOWLIST = {
 _CURSOR_SECRET_MISCONFIG_REASON_ALLOWLIST = {
     PAGINATION_CURSOR_SECRET_MISSING,
     PAGINATION_CURSOR_SECRET_WEAK,
+    PAGINATION_CURSOR_KEYRING_INVALID,
 }
 _CURSOR_SCOPE_BINDING_REASON_ALLOWLIST = {
     PAGINATION_CURSOR_SCOPE_MISSING,
@@ -913,6 +920,8 @@ def _cursor_validation_outcome_from_reason_code(reason_code: Any) -> str | None:
         "PAGINATION_CURSOR_SCOPE_MISSING": "SCOPE_MISSING",
         "PAGINATION_CURSOR_SCOPE_MISMATCH": "SCOPE_MISMATCH",
         PAGINATION_CURSOR_KID_MISSING: "INVALID",
+        PAGINATION_CURSOR_KID_UNKNOWN: "INVALID",
+        PAGINATION_CURSOR_KEYRING_INVALID: "INVALID",
         "PAGINATION_CURSOR_SIGNATURE_INVALID": "SIGNATURE_INVALID",
         "PAGINATION_CURSOR_SECRET_MISSING": "SECRET_MISSING",
         "PAGINATION_CURSOR_SECRET_WEAK": "SECRET_WEAK",
@@ -3251,17 +3260,21 @@ async def handler(
             or _DEFAULT_PAGINATION_MAX_OFFSET_PAGES
         ),
     )
-    cursor_signing_secrets = CursorSigningSecrets.from_env()
-    pagination_token_secret = cursor_signing_secrets.secret
-    _pagination_signing_available = cursor_signing_secrets.valid
-    pagination_secret_failure_reason_code = cursor_signing_secrets.reason_code
+    cursor_signing_keyring = CursorSigningKeyring.from_env()
+    pagination_token_secret = None
+    if cursor_signing_keyring.valid and cursor_signing_keyring.active_kid is not None:
+        pagination_token_secret = cursor_signing_keyring.keys.get(cursor_signing_keyring.active_kid)
+    _pagination_signing_available = (
+        cursor_signing_keyring.valid and pagination_token_secret is not None
+    )
+    pagination_secret_failure_reason_code = cursor_signing_keyring.reason_code
     tenant_enforcement_metadata["pagination.cursor.signing_secret_configured"] = (
-        cursor_signing_secrets.configured
+        cursor_signing_keyring.configured
     )
     tenant_enforcement_metadata["pagination.cursor.secret_configured"] = (
-        cursor_signing_secrets.configured
+        cursor_signing_keyring.configured
     )
-    tenant_enforcement_metadata["pagination.cursor.secret_valid"] = cursor_signing_secrets.valid
+    tenant_enforcement_metadata["pagination.cursor.secret_valid"] = cursor_signing_keyring.valid
     tenant_enforcement_metadata["pagination.cursor.ttl_enabled"] = bool(cursor_ttl_ms > 0)
     tenant_enforcement_metadata["pagination.cursor.scope_bound"] = False
     tenant_enforcement_metadata["pagination.cursor.scope_mismatch"] = False
@@ -3583,6 +3596,7 @@ async def handler(
                         keyset_values = decode_keyset_cursor(
                             keyset_cursor,
                             expected_fingerprint=query_fingerprint,
+                            signing_keyring=cursor_signing_keyring,
                             secret=pagination_token_secret,
                             expected_keys=keyset_order_signature,
                             expected_cursor_context=expected_cursor_context or None,
@@ -3654,6 +3668,10 @@ async def handler(
                             tenant_enforcement_metadata["pagination.cursor.scope_mismatch"] = True
                         elif PAGINATION_CURSOR_KID_MISSING in str(e):
                             reason_code = PAGINATION_CURSOR_KID_MISSING
+                        elif PAGINATION_CURSOR_KID_UNKNOWN in str(e):
+                            reason_code = PAGINATION_CURSOR_KID_UNKNOWN
+                        elif PAGINATION_CURSOR_KEYRING_INVALID in str(e):
+                            reason_code = PAGINATION_CURSOR_KEYRING_INVALID
                         elif PAGINATION_BUDGET_SNAPSHOT_INVALID in str(e):
                             reason_code = PAGINATION_BUDGET_SNAPSHOT_INVALID
                         elif PAGINATION_CURSOR_VERSION_UNSUPPORTED in str(e):
@@ -3828,6 +3846,7 @@ async def handler(
                             token=page_token,
                             expected_fingerprint=query_fingerprint,
                             max_length=max_page_token_len,
+                            signing_keyring=cursor_signing_keyring,
                             secret=pagination_token_secret or None,
                             decode_metadata=offset_decode_metadata,
                             clock_skew_ms=cursor_clock_skew_ms,
@@ -4087,6 +4106,7 @@ async def handler(
                 offset=int(offset_next_token_payload["offset"]),
                 limit=int(offset_next_token_payload["limit"]),
                 fingerprint=query_fingerprint or "",
+                signing_keyring=cursor_signing_keyring,
                 secret=pagination_token_secret or None,
                 ttl_ms=cursor_ttl_ms,
                 query_fp=(cursor_query_fingerprint if cursor_bind_query_fingerprint else None),
@@ -4166,6 +4186,7 @@ async def handler(
                     keyset_vals,
                     keyset_order_signature,
                     query_fingerprint,
+                    signing_keyring=cursor_signing_keyring,
                     secret=pagination_token_secret,
                     cursor_context=keyset_cursor_context or None,
                     ttl_ms=cursor_ttl_ms,
