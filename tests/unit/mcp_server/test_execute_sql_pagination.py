@@ -46,9 +46,13 @@ _CURSOR_MIGRATION_FIXTURE_DIR = (
 
 
 def _encode_legacy_offset_token(payload: dict[str, object], *, sign: bool = True) -> str:
-    wrapper: dict[str, object] = {"p": payload}
+    normalized_payload = dict(payload)
+    normalized_payload.setdefault("kid", "legacy")
+    wrapper: dict[str, object] = {"p": normalized_payload}
     if sign:
-        inner = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        inner = json.dumps(normalized_payload, separators=(",", ":"), sort_keys=True).encode(
+            "utf-8"
+        )
         wrapper["s"] = hmac.new(
             _TEST_SECRET.encode("utf-8"), inner, digestmod=hashlib.sha256
         ).hexdigest()

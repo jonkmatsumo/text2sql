@@ -33,6 +33,7 @@ def test_offset_legacy_v0_cursor_migrates_and_decodes() -> None:
                 "fingerprint": "fp-offset-v0",
                 "issued_at": 1_700_000_000,
                 "max_age_s": 120,
+                "kid": "legacy",
             }
         }
     )
@@ -60,6 +61,7 @@ def test_offset_legacy_v0_cursor_missing_critical_fields_fails_closed() -> None:
                 "limit": 3,
                 "fingerprint": "fp-offset-v0",
                 "issued_at": 1_700_000_000,
+                "kid": "legacy",
             }
         }
     )
@@ -85,6 +87,7 @@ def test_offset_migrated_legacy_cursor_matches_native_v1_paging_semantics() -> N
                 "f": "fp-offset-parity",
                 "issued_at_ms": 1_700_000_100_000,
                 "ttl_ms": 300_000,
+                "kid": "legacy",
             }
         }
     )

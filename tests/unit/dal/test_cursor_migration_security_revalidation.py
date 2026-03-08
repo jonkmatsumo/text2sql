@@ -37,6 +37,7 @@ def test_migrated_offset_cursor_rejected_on_scope_mismatch() -> None:
                 "issued_at": 1_700_000_000,
                 "max_age_s": 120,
                 "scope_fp": "abcdeffedcba0123",
+                "kid": "legacy",
             }
         }
     )
@@ -63,6 +64,7 @@ def test_migrated_offset_cursor_rejected_when_expired() -> None:
                 "fingerprint": "fp-expired",
                 "issued_at": 1_000,
                 "max_age_s": 30,
+                "kid": "legacy",
             }
         }
     )
@@ -87,6 +89,7 @@ def test_migrated_keyset_cursor_rejected_on_order_signature_mismatch() -> None:
             "f": "fp-order",
             "issued_at": 1_700_000_000,
             "max_age_s": 300,
+            "kid": "legacy",
         }
     )
 

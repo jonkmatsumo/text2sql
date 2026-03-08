@@ -21,6 +21,7 @@ from dal.pagination_cursor import (
     DEFAULT_CURSOR_TTL_MS,
     PAGINATION_CURSOR_CLOCK_SKEW,
     PAGINATION_CURSOR_EXPIRED,
+    PAGINATION_CURSOR_KID_MISSING,
     PAGINATION_CURSOR_MIGRATION_UNSAFE,
     PAGINATION_CURSOR_REPLAY_DETECTED,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
@@ -34,6 +35,7 @@ from dal.pagination_cursor import (
     build_cursor_envelope,
     build_cursor_nonce,
     cursor_now_epoch_milliseconds,
+    normalize_cursor_kid,
     normalize_cursor_milliseconds,
     normalize_cursor_nonce,
     normalize_cursor_scope_fingerprint,
@@ -258,6 +260,7 @@ class KeysetCursorMigrationResult:
 
 _KEYSET_CURSOR_KIND = "keyset"
 _KEYSET_CURSOR_CURRENT_VERSION = 1
+_KEYSET_CURSOR_DEFAULT_KID = "legacy"
 
 
 def _extract_first_present(payload: Dict[str, Any], *keys: str) -> Any:
@@ -347,6 +350,7 @@ def _migrate_keyset_payload_v0_to_v1(payload: Dict[str, Any]) -> Dict[str, Any]:
     query_fp_raw = _extract_first_present(payload, "query_fp")
     query_fp = str(query_fp_raw).strip() if isinstance(query_fp_raw, str) else ""
     scope_fp = normalize_cursor_scope_fingerprint(_extract_first_present(payload, "scope_fp"))
+    kid = normalize_cursor_kid(_extract_first_present(payload, "kid"))
     cursor_context = _normalize_cursor_context(
         _extract_first_present(payload, "c", "cursor_context")
     )
@@ -367,6 +371,8 @@ def _migrate_keyset_payload_v0_to_v1(payload: Dict[str, Any]) -> Dict[str, Any]:
         migrated_payload["query_fp"] = query_fp
     if scope_fp:
         migrated_payload["scope_fp"] = scope_fp
+    if kid:
+        migrated_payload["kid"] = kid
     if cursor_context:
         migrated_payload["c"] = cursor_context
     if "budget_snapshot" in payload:
@@ -420,6 +426,7 @@ def encode_keyset_cursor(
     nonce: str | None = None,
     issued_at: int | None = None,
     max_age_s: int | None = None,
+    kid: str | None = None,
     now_epoch_milliseconds: int | None = None,
     now_epoch_seconds: int | None = None,
     query_fp: str | None = None,
@@ -459,6 +466,10 @@ def encode_keyset_cursor(
         "issued_at": int(normalized_issued_at_ms) // 1000,
         "max_age_s": max(1, int(normalized_ttl_ms) // 1000),
     }
+    normalized_kid = normalize_cursor_kid(kid if kid is not None else _KEYSET_CURSOR_DEFAULT_KID)
+    if normalized_kid is None:
+        raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_KID_MISSING}.")
+    payload["kid"] = normalized_kid
     payload["nonce"] = normalize_cursor_nonce(nonce) or build_cursor_nonce()
     normalized_query_fp = str(query_fp).strip() if isinstance(query_fp, str) else ""
     if normalized_query_fp:
@@ -509,6 +520,13 @@ def decode_keyset_cursor(
 
         json_data = base64.urlsafe_b64decode(cursor).decode()
         payload = json.loads(json_data)
+        payload_kid = normalize_cursor_kid(payload.get("kid"))
+        if isinstance(decode_metadata, dict):
+            decode_metadata["kid_present"] = payload_kid is not None
+        if payload_kid is None:
+            if isinstance(decode_metadata, dict):
+                decode_metadata["validation_outcome"] = "INVALID"
+            raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_KID_MISSING}.")
 
         if secret:
             stored_sig = payload.get("s")
@@ -538,6 +556,11 @@ def decode_keyset_cursor(
                 decode_metadata["validation_outcome"] = "INVALID"
             raise ValueError(f"Invalid cursor: {exc.reason_code}.") from exc
         payload = migration_result.payload
+        payload_kid = normalize_cursor_kid(payload.get("kid"))
+        if payload_kid is None:
+            if isinstance(decode_metadata, dict):
+                decode_metadata["validation_outcome"] = "INVALID"
+            raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_KID_MISSING}.")
         if isinstance(decode_metadata, dict):
             decode_metadata["migration_attempted"] = migration_result.migration_attempted
             decode_metadata["migration_outcome"] = migration_result.migration_outcome

@@ -80,6 +80,7 @@ from typing import Any, Callable
 PAGINATION_CURSOR_SECRET_MISSING = "PAGINATION_CURSOR_SECRET_MISSING"
 PAGINATION_CURSOR_SECRET_WEAK = "PAGINATION_CURSOR_SECRET_WEAK"
 PAGINATION_CURSOR_SIGNATURE_INVALID = "PAGINATION_CURSOR_SIGNATURE_INVALID"
+PAGINATION_CURSOR_KID_MISSING = "PAGINATION_CURSOR_KID_MISSING"
 PAGINATION_CURSOR_SCOPE_MISSING = "PAGINATION_CURSOR_SCOPE_MISSING"
 PAGINATION_CURSOR_SCOPE_MISMATCH = "PAGINATION_CURSOR_SCOPE_MISMATCH"
 PAGINATION_CURSOR_TTL_MISSING = "PAGINATION_CURSOR_TTL_MISSING"
@@ -101,9 +102,13 @@ MAX_CURSOR_CLOCK_SKEW_MS = 300_000
 DEFAULT_CURSOR_REPLAY_CACHE_MAX_ENTRIES = 10_000
 MAX_CURSOR_REPLAY_CACHE_MAX_ENTRIES = 100_000
 CURSOR_NONCE_MAX_LENGTH = 128
+CURSOR_KID_MAX_LENGTH = 64
 
 _PRIMARY_CURSOR_SECRET_ENV = "PAGINATION_CURSOR_HMAC_SECRET"
 _LEGACY_CURSOR_SECRET_ENV = "PAGINATION_CURSOR_SIGNING_SECRET"
+_ACTIVE_CURSOR_KID_ENV = "PAGINATION_CURSOR_SIGNING_ACTIVE_KID"
+_DEFAULT_LEGACY_CURSOR_KID = "legacy"
+_CURSOR_KEYRING_JSON_ENV = "PAGINATION_CURSOR_SIGNING_KEYS_JSON"
 
 SUPPORTED_CURSOR_KINDS = frozenset({"offset", "keyset"})
 CursorMigrationFn = Callable[[dict[str, Any]], dict[str, Any]]
@@ -340,11 +345,49 @@ class CursorSigningSecretWeak(ValueError):
         self.reason_code = PAGINATION_CURSOR_SECRET_WEAK
 
 
+class CursorSigningKidMissing(ValueError):
+    """Raised when the active cursor signing key id (kid) is missing or malformed."""
+
+    def __init__(self) -> None:
+        """Initialize with a bounded reason code and non-sensitive guidance message."""
+        super().__init__(
+            f"{PAGINATION_CURSOR_KID_MISSING}: Cursor signing key id is missing or invalid. "
+            f"Set {_ACTIVE_CURSOR_KID_ENV} to a bounded identifier (max {CURSOR_KID_MAX_LENGTH} "
+            "chars, lowercase letters/digits/._-)."
+        )
+        self.reason_code = PAGINATION_CURSOR_KID_MISSING
+
+
+@dataclass(frozen=True)
+class CursorSigningKeyConfig:
+    """Normalized cursor key-id configuration sourced from environment."""
+
+    active_kid: str
+    keyring_json_configured: bool
+
+    @classmethod
+    def from_env(cls) -> "CursorSigningKeyConfig":
+        """Resolve active kid and keyring-json presence from environment."""
+        raw_active_kid = os.environ.get(_ACTIVE_CURSOR_KID_ENV)
+        if raw_active_kid is None:
+            active_kid = _DEFAULT_LEGACY_CURSOR_KID
+        else:
+            normalized_active_kid = normalize_cursor_kid(raw_active_kid)
+            if normalized_active_kid is None:
+                raise CursorSigningKidMissing()
+            active_kid = normalized_active_kid
+        return cls(
+            active_kid=active_kid,
+            keyring_json_configured=(os.environ.get(_CURSOR_KEYRING_JSON_ENV) is not None),
+        )
+
+
 @dataclass(frozen=True)
 class CursorSigningSecrets:
     """Normalized cursor-secret configuration state for fail-closed enforcement."""
 
     secret: str | None
+    active_kid: str | None
     configured: bool
     valid: bool
     reason_code: str | None = None
@@ -358,10 +401,18 @@ class CursorSigningSecrets:
         1. ``PAGINATION_CURSOR_HMAC_SECRET`` (preferred)
         2. ``PAGINATION_CURSOR_SIGNING_SECRET`` (legacy fallback alias)
         """
+        try:
+            key_config = CursorSigningKeyConfig.from_env()
+        except CursorSigningKidMissing:
+            key_config = CursorSigningKeyConfig(
+                active_kid="",
+                keyring_json_configured=(os.environ.get(_CURSOR_KEYRING_JSON_ENV) is not None),
+            )
         secret_value, source_env_var = _resolve_env_secret_value()
         if secret_value is None:
             return cls(
                 secret=None,
+                active_kid=key_config.active_kid or None,
                 configured=False,
                 valid=False,
                 reason_code=PAGINATION_CURSOR_SECRET_MISSING,
@@ -371,27 +422,44 @@ class CursorSigningSecrets:
         if len(secret_value.encode("utf-8")) < PAGINATION_CURSOR_MIN_SECRET_BYTES:
             return cls(
                 secret=None,
+                active_kid=key_config.active_kid or None,
                 configured=True,
                 valid=False,
                 reason_code=PAGINATION_CURSOR_SECRET_WEAK,
                 source_env_var=source_env_var,
             )
+        if not key_config.active_kid:
+            return cls(
+                secret=None,
+                active_kid=None,
+                configured=True,
+                valid=False,
+                reason_code=PAGINATION_CURSOR_KID_MISSING,
+                source_env_var=source_env_var,
+            )
 
         return cls(
             secret=secret_value,
+            active_kid=key_config.active_kid,
             configured=True,
             valid=True,
             reason_code=None,
             source_env_var=source_env_var,
         )
 
-    def require_valid_secret(self) -> str:
-        """Return the resolved secret or raise a bounded fail-closed error."""
-        if self.valid and self.secret is not None:
-            return self.secret
+    def require_active_signing_key(self) -> tuple[str, str]:
+        """Return the active ``(kid, secret)`` tuple or raise a bounded fail-closed error."""
+        if self.valid and self.secret is not None and self.active_kid:
+            return self.active_kid, self.secret
         if self.reason_code == PAGINATION_CURSOR_SECRET_WEAK:
             raise CursorSigningSecretWeak()
+        if self.reason_code == PAGINATION_CURSOR_KID_MISSING:
+            raise CursorSigningKidMissing()
         raise CursorSigningSecretMissing()
+
+    def require_valid_secret(self) -> str:
+        """Return the resolved secret or raise a bounded fail-closed error."""
+        return self.require_active_signing_key()[1]
 
 
 def _resolve_env_secret_value() -> tuple[str | None, str | None]:
@@ -418,6 +486,25 @@ def resolve_cursor_signing_secret(
     """
     _ = allow_unsigned
     return CursorSigningSecrets.from_env().require_valid_secret()
+
+
+def resolve_cursor_signing_active_kid() -> str:
+    """Resolve the active cursor signing key id from environment."""
+    return CursorSigningSecrets.from_env().require_active_signing_key()[0]
+
+
+def normalize_cursor_kid(value: Any) -> str | None:
+    """Normalize bounded cursor key identifiers used for signing/verification."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    if len(normalized) > CURSOR_KID_MAX_LENGTH:
+        return None
+    if any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789._-" for ch in normalized):
+        return None
+    return normalized
 
 
 def cursor_now_epoch_seconds(*, now_epoch_seconds: int | None = None) -> int:
