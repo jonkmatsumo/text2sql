@@ -131,3 +131,55 @@ def test_record_access_returns_none_for_revoked_session() -> None:
     assert loaded.is_revoked is True
     assert loaded.pages_served_count == 0
     assert loaded.last_accessed_at_ms is None
+
+
+def test_registry_ttl_expiry_evicts_stale_session() -> None:
+    """Registry get should return None once a session ages beyond ttl_ms."""
+    now_state = {"value": 1_700_000_000_000}
+    registry = InMemoryPaginationSessionRegistry(ttl_ms=100, now_ms=lambda: now_state["value"])
+    session = create_pagination_session(
+        tenant_id="tenant-ttl",
+        provider_name="postgres",
+        pagination_mode="offset",
+        query_scope_fp="scope-fp-ttl",
+        policy_snapshot_fp="policy-fp-ttl",
+        revocation_epoch=0,
+        now_epoch_milliseconds=now_state["value"],
+    )
+    registry.put(session)
+
+    now_state["value"] = 1_700_000_000_050
+    assert registry.get(session.session_id) is not None
+    now_state["value"] = 1_700_000_000_101
+    assert registry.get(session.session_id) is None
+
+
+def test_registry_capacity_eviction_removes_oldest_session() -> None:
+    """Bounded max_entries should evict least-recently-used sessions."""
+    now_state = {"value": 1_700_000_000_000}
+    registry = InMemoryPaginationSessionRegistry(max_entries=1, now_ms=lambda: now_state["value"])
+    session_one = create_pagination_session(
+        tenant_id="tenant-evict-1",
+        provider_name="postgres",
+        pagination_mode="offset",
+        query_scope_fp="scope-fp-evict-1",
+        policy_snapshot_fp="policy-fp-evict-1",
+        revocation_epoch=0,
+        now_epoch_milliseconds=now_state["value"],
+    )
+    registry.put(session_one)
+
+    now_state["value"] = 1_700_000_000_001
+    session_two = create_pagination_session(
+        tenant_id="tenant-evict-2",
+        provider_name="postgres",
+        pagination_mode="offset",
+        query_scope_fp="scope-fp-evict-2",
+        policy_snapshot_fp="policy-fp-evict-2",
+        revocation_epoch=0,
+        now_epoch_milliseconds=now_state["value"],
+    )
+    registry.put(session_two)
+
+    assert registry.get(session_one.session_id) is None
+    assert registry.get(session_two.session_id) is not None

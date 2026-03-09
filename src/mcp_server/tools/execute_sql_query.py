@@ -1305,7 +1305,10 @@ def _validate_pagination_session_binding(
     normalized_session_id = normalize_pagination_session_id(session_id)
     if normalized_session_id is None:
         return None, PAGINATION_SESSION_MISSING
-    session = registry.get(normalized_session_id)
+    registry_get = getattr(registry, "get", None)
+    if not callable(registry_get):
+        return None, PAGINATION_SESSION_UNKNOWN
+    session = registry_get(normalized_session_id)
     if session is None:
         return None, PAGINATION_SESSION_UNKNOWN
     if bool(getattr(session, "is_revoked", False)):
@@ -3724,6 +3727,31 @@ async def handler(
             or page_size is not None
             or pagination_mode == "keyset"
         )
+        pagination_session_registry_ready = all(
+            callable(getattr(pagination_session_registry, method_name, None))
+            for method_name in ("get", "put", "record_access")
+        )
+        if pagination_session_binding_enabled and not pagination_session_registry_ready:
+            reason_code = PAGINATION_SESSION_UNKNOWN
+            _apply_cursor_decode_metadata(
+                tenant_enforcement_metadata,
+                {},
+                fallback_reason_code=reason_code,
+            )
+            _apply_pagination_session_failure_metadata(
+                tenant_enforcement_metadata,
+                reason_code=reason_code,
+            )
+            if pagination_mode == "keyset":
+                tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = reason_code
+            return _construct_error_response(
+                execution_started_at,
+                message="Pagination session registry is unavailable.",
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={"reason_code": reason_code},
+                envelope_metadata=tenant_enforcement_metadata,
+            )
 
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
             keyset_cursor_context = _extract_keyset_cursor_context(conn)
