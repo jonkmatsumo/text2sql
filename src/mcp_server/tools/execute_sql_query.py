@@ -2698,6 +2698,8 @@ async def handler(
         "pagination_mode_used": pagination_mode,
         "next_keyset_cursor": None,
         "pagination_session_id": None,
+        "pagination.session.last_accessed_at_ms": None,
+        "pagination.session.pages_served_count": None,
         "execution_timeout_applied": execution_timeout_applied,
         "execution_timeout_triggered": False,
         "resource_capability_mismatch": None,
@@ -3566,6 +3568,7 @@ async def handler(
         pagination_session = None
         pagination_session_id: str | None = None
         pagination_session_scope_bindings: dict[str, Any] | None = None
+        pagination_session_continuation_validated = False
         pagination_session_registry = get_default_pagination_session_registry()
         pagination_session_continuation_requested = bool(page_token or keyset_cursor)
         pagination_session_binding_enabled = bool(
@@ -3645,6 +3648,12 @@ async def handler(
                 pagination_session_registry.put(pagination_session)
                 pagination_session_id = pagination_session.session_id
                 tenant_enforcement_metadata["pagination_session_id"] = pagination_session_id
+                tenant_enforcement_metadata["pagination.session.last_accessed_at_ms"] = (
+                    pagination_session.last_accessed_at_ms
+                )
+                tenant_enforcement_metadata["pagination.session.pages_served_count"] = (
+                    pagination_session.pages_served_count
+                )
             raw_session_guardrail_metadata = getattr(conn, "session_guardrail_metadata", {})
             if isinstance(raw_session_guardrail_metadata, dict):
                 session_guardrail_metadata = {
@@ -3976,6 +3985,13 @@ async def handler(
                         keyset_decode_metadata.get("pagination_session_id")
                     )
                     tenant_enforcement_metadata["pagination_session_id"] = pagination_session_id
+                    tenant_enforcement_metadata["pagination.session.last_accessed_at_ms"] = (
+                        pagination_session.last_accessed_at_ms
+                    )
+                    tenant_enforcement_metadata["pagination.session.pages_served_count"] = (
+                        pagination_session.pages_served_count
+                    )
+                    pagination_session_continuation_validated = True
                     try:
                         execution_budget = ExecutionBudget.from_snapshot(
                             keyset_decode_metadata.get("budget_snapshot")
@@ -4055,6 +4071,7 @@ async def handler(
                 nonlocal columns, next_token, offset_decode_metadata, offset_next_token_payload
                 nonlocal execution_budget
                 nonlocal pagination_session, pagination_session_id
+                nonlocal pagination_session_continuation_validated
                 fetch_page = getattr(conn, "fetch_page", None)
                 fetch_page_with_columns = getattr(conn, "fetch_page_with_columns", None)
                 offset_pagination_requested = pagination_mode == "offset" and bool(
@@ -4143,6 +4160,13 @@ async def handler(
                             )
                         pagination_session_id = token_payload.pagination_session_id
                         tenant_enforcement_metadata["pagination_session_id"] = pagination_session_id
+                        tenant_enforcement_metadata["pagination.session.last_accessed_at_ms"] = (
+                            pagination_session.last_accessed_at_ms
+                        )
+                        tenant_enforcement_metadata["pagination.session.pages_served_count"] = (
+                            pagination_session.pages_served_count
+                        )
+                        pagination_session_continuation_validated = True
                         pagination_offset = token_payload.offset
                         pagination_limit = token_payload.limit
                         try:
@@ -4507,6 +4531,37 @@ async def handler(
         cap_detected = partial_reason == PayloadTruncationReason.PROVIDER_CAP.value
         cap_mitigation_applied = False
         cap_mitigation_mode = "none"
+        if pagination_session_continuation_validated and pagination_session_id is not None:
+            updated_session = pagination_session_registry.record_access(pagination_session_id)
+            if updated_session is None:
+                reason_code = PAGINATION_SESSION_UNKNOWN
+                current_session = pagination_session_registry.get(pagination_session_id)
+                if current_session is not None and current_session.is_revoked:
+                    reason_code = PAGINATION_SESSION_REVOKED
+                _apply_cursor_decode_metadata(
+                    tenant_enforcement_metadata,
+                    offset_decode_metadata,
+                    fallback_reason_code=reason_code,
+                )
+                if pagination_mode == "keyset":
+                    tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
+                        reason_code
+                    )
+                return _construct_error_response(
+                    execution_started_at,
+                    message="Pagination cursor session validation failed.",
+                    category=ErrorCategory.INVALID_REQUEST,
+                    provider=provider,
+                    metadata={"reason_code": reason_code},
+                    envelope_metadata=tenant_enforcement_metadata,
+                )
+            pagination_session = updated_session
+            tenant_enforcement_metadata["pagination.session.last_accessed_at_ms"] = (
+                updated_session.last_accessed_at_ms
+            )
+            tenant_enforcement_metadata["pagination.session.pages_served_count"] = (
+                updated_session.pages_served_count
+            )
         if cap_detected and cap_mitigation_setting == "safe":
             if caps.supports_pagination:
                 if next_token:
@@ -4664,6 +4719,12 @@ async def handler(
                 ),
                 "pagination.keyset.partition_set_changed": tenant_enforcement_metadata.get(
                     "pagination.keyset.partition_set_changed"
+                ),
+                "pagination.session.last_accessed_at_ms": tenant_enforcement_metadata.get(
+                    "pagination.session.last_accessed_at_ms"
+                ),
+                "pagination.session.pages_served_count": tenant_enforcement_metadata.get(
+                    "pagination.session.pages_served_count"
                 ),
                 "pagination.keyset.replica_lag_seconds": tenant_enforcement_metadata.get(
                     "pagination.keyset.replica_lag_seconds"

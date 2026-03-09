@@ -21,6 +21,7 @@ from dal.offset_pagination import (
 from dal.pagination_cursor import PAGINATION_CURSOR_SCOPE_MISMATCH, build_cursor_scope_fingerprint
 from dal.pagination_session import (
     PAGINATION_SESSION_MISSING,
+    PAGINATION_SESSION_REVOKED,
     PAGINATION_SESSION_SCOPE_MISMATCH,
     create_pagination_session,
     get_default_pagination_session_registry,
@@ -198,6 +199,113 @@ async def test_offset_second_page_validates_same_session_id(monkeypatch):
     assert isinstance(next_token, str) and next_token
     wrapper = _decode_offset_wrapper(next_token)
     assert wrapper["p"]["pagination_session_id"] == session_id
+
+
+@pytest.mark.asyncio
+async def test_offset_revoked_session_rejects_continuation(monkeypatch):
+    """Revoking a session between pages must fail closed on the next continuation."""
+    sql = "SELECT id FROM users ORDER BY id"
+    monkeypatch.setenv("PAGINATION_CURSOR_HMAC_SECRET", _TEST_SECRET)
+    registry = get_default_pagination_session_registry()
+    registry.clear()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=_offset_caps(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_a, **_kw: _conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+    ):
+        first_payload = await handler(sql, tenant_id=1, page_size=2)
+        first = json.loads(first_payload)
+        session_id = first["metadata"].get("pagination_session_id")
+        token = first["metadata"].get("next_page_token")
+        assert isinstance(session_id, str) and session_id
+        assert isinstance(token, str) and token
+        revoked = registry.revoke_session(session_id)
+        assert revoked is not None and revoked.is_revoked is True
+
+        second_payload = await handler(sql, tenant_id=1, page_size=2, page_token=token)
+
+    second = json.loads(second_payload)
+    assert second["error"]["category"] == "invalid_request"
+    assert second["error"]["error_code"] == "VALIDATION_ERROR"
+    assert second["error"]["details_safe"]["reason_code"] == PAGINATION_SESSION_REVOKED
+    assert (
+        second["metadata"].get("pagination.cursor.decode_reason_code") == PAGINATION_SESSION_REVOKED
+    )
+
+
+@pytest.mark.asyncio
+async def test_offset_session_audit_updates_only_on_successful_continuation(monkeypatch):
+    """Session audit counters should advance only after successful continuation requests."""
+    sql = "SELECT id FROM users ORDER BY id"
+    monkeypatch.setenv("PAGINATION_CURSOR_HMAC_SECRET", _TEST_SECRET)
+    registry = get_default_pagination_session_registry()
+    registry.clear()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=_offset_caps(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_a, **_kw: _conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+    ):
+        first_payload = await handler(sql, tenant_id=1, page_size=2)
+        first = json.loads(first_payload)
+        session_id = first["metadata"].get("pagination_session_id")
+        token = first["metadata"].get("next_page_token")
+        assert isinstance(session_id, str) and session_id
+        assert isinstance(token, str) and token
+        session_initial = registry.get(session_id)
+        assert session_initial is not None
+        assert session_initial.pages_served_count == 0
+        assert session_initial.last_accessed_at_ms is None
+
+        second_payload = await handler(sql, tenant_id=1, page_size=2, page_token=token)
+        second = json.loads(second_payload)
+        assert "error" not in second
+        session_after_success = registry.get(session_id)
+        assert session_after_success is not None
+        assert session_after_success.pages_served_count == 1
+        assert session_after_success.last_accessed_at_ms is not None
+        last_access_after_success = session_after_success.last_accessed_at_ms
+
+        wrapper = _decode_offset_wrapper(token)
+        payload = dict(wrapper["p"])
+        payload.pop("pagination_session_id", None)
+        payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        wrapper["p"] = payload
+        wrapper["s"] = hmac.new(
+            _TEST_SECRET.encode("utf-8"), payload_bytes, digestmod=hashlib.sha256
+        ).hexdigest()
+        tampered = _encode_offset_wrapper(wrapper)
+        failed_payload = await handler(sql, tenant_id=1, page_size=2, page_token=tampered)
+
+    failed = json.loads(failed_payload)
+    assert failed["error"]["details_safe"]["reason_code"] == PAGINATION_SESSION_MISSING
+    session_after_failure = registry.get(session_id)
+    assert session_after_failure is not None
+    assert session_after_failure.pages_served_count == 1
+    assert session_after_failure.last_accessed_at_ms == last_access_after_success
 
 
 @pytest.mark.asyncio

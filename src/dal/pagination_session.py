@@ -48,6 +48,8 @@ class PaginationSession:
     policy_snapshot_fp: str
     revocation_epoch: int
     is_revoked: bool = False
+    last_accessed_at_ms: int | None = None
+    pages_served_count: int = 0
 
     def __post_init__(self) -> None:
         """Fail closed for malformed, unbounded, or unsafe session payloads."""
@@ -99,6 +101,15 @@ class PaginationSession:
             raise ValueError("Pagination session revocation_epoch is out of bounds.")
         if not isinstance(self.is_revoked, bool):
             raise ValueError("Pagination session is_revoked must be a boolean.")
+        if self.last_accessed_at_ms is not None:
+            if not isinstance(self.last_accessed_at_ms, int):
+                raise ValueError("Pagination session last_accessed_at_ms must be an integer.")
+            if self.last_accessed_at_ms < 0 or self.last_accessed_at_ms > CURSOR_MAX_SIGNED_INT:
+                raise ValueError("Pagination session last_accessed_at_ms is out of bounds.")
+        if not isinstance(self.pages_served_count, int):
+            raise ValueError("Pagination session pages_served_count must be an integer.")
+        if self.pages_served_count < 0 or self.pages_served_count > CURSOR_MAX_SIGNED_INT:
+            raise ValueError("Pagination session pages_served_count is out of bounds.")
 
     @staticmethod
     def _validate_required_field(name: str, value: str, max_length: int) -> None:
@@ -163,8 +174,14 @@ class PaginationSessionRegistry(Protocol):
     def put(self, session: PaginationSession) -> PaginationSession:
         """Persist a bounded session object."""
 
-    def revoke(self, session_id: str) -> PaginationSession | None:
+    def revoke_session(self, session_id: str) -> PaginationSession | None:
         """Mark a session revoked when present and not expired."""
+
+    def revoke(self, session_id: str) -> PaginationSession | None:
+        """Backward-compatible alias for revoke_session."""
+
+    def record_access(self, session_id: str) -> PaginationSession | None:
+        """Increment continuation audit counters for a successful page retrieval."""
 
 
 class InMemoryPaginationSessionRegistry(PaginationSessionRegistry):
@@ -220,7 +237,7 @@ class InMemoryPaginationSessionRegistry(PaginationSessionRegistry):
                 self._sessions.popitem(last=False)
         return session
 
-    def revoke(self, session_id: str) -> PaginationSession | None:
+    def revoke_session(self, session_id: str) -> PaginationSession | None:
         """Mark a stored session revoked and return the updated session object."""
         normalized_session_id = normalize_pagination_session_id(session_id)
         if normalized_session_id is None:
@@ -238,6 +255,31 @@ class InMemoryPaginationSessionRegistry(PaginationSessionRegistry):
             self._sessions[normalized_session_id] = revoked
             self._sessions.move_to_end(normalized_session_id)
             return revoked
+
+    def revoke(self, session_id: str) -> PaginationSession | None:
+        """Backward-compatible alias for revoke_session."""
+        return self.revoke_session(session_id)
+
+    def record_access(self, session_id: str) -> PaginationSession | None:
+        """Update bounded audit state after a successful continuation request."""
+        normalized_session_id = normalize_pagination_session_id(session_id)
+        if normalized_session_id is None:
+            return None
+        now_ms = self._safe_now_ms()
+        with self._lock:
+            self._evict_expired_locked(now_ms)
+            session = self._sessions.get(normalized_session_id)
+            if session is None or session.is_revoked:
+                return None
+            next_pages_served_count = min(CURSOR_MAX_SIGNED_INT, session.pages_served_count + 1)
+            updated = replace(
+                session,
+                pages_served_count=next_pages_served_count,
+                last_accessed_at_ms=now_ms,
+            )
+            self._sessions[normalized_session_id] = updated
+            self._sessions.move_to_end(normalized_session_id)
+            return updated
 
     def clear(self) -> None:
         """Clear all in-memory state (test-only helper)."""
@@ -271,6 +313,26 @@ def get_default_pagination_session_registry() -> InMemoryPaginationSessionRegist
         if _DEFAULT_REGISTRY is None:
             _DEFAULT_REGISTRY = InMemoryPaginationSessionRegistry()
         return _DEFAULT_REGISTRY
+
+
+def revoke_session(
+    session_id: str,
+    *,
+    registry: PaginationSessionRegistry | None = None,
+) -> PaginationSession | None:
+    """Revoke a pagination session in the provided/default registry."""
+    active_registry = registry or get_default_pagination_session_registry()
+    return active_registry.revoke_session(session_id)
+
+
+def record_session_access(
+    session_id: str,
+    *,
+    registry: PaginationSessionRegistry | None = None,
+) -> PaginationSession | None:
+    """Record successful continuation access in the provided/default registry."""
+    active_registry = registry or get_default_pagination_session_registry()
+    return active_registry.record_access(session_id)
 
 
 def normalize_pagination_session_id(session_id: str) -> str | None:

@@ -135,6 +135,18 @@ class ExecuteSQLQueryMetadata(BaseModel):
     pagination_session_id: Optional[str] = Field(
         None, description="Server-issued pagination session id bound to this pagination chain"
     )
+    pagination_session_last_accessed_at_ms: Optional[int] = Field(
+        None,
+        description="Epoch milliseconds of the last successful continuation for this session",
+        validation_alias="pagination.session.last_accessed_at_ms",
+        serialization_alias="pagination.session.last_accessed_at_ms",
+    )
+    pagination_session_pages_served_count: Optional[int] = Field(
+        None,
+        description="Number of successful continuation pages served for this session",
+        validation_alias="pagination.session.pages_served_count",
+        serialization_alias="pagination.session.pages_served_count",
+    )
     next_keyset_cursor: Optional[str] = Field(
         None, description="Opaque cursor for the next page when using keyset pagination"
     )

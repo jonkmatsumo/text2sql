@@ -69,10 +69,65 @@ def test_revoke_marks_session_revoked_and_subsequent_get_reads_revoked() -> None
     )
     registry.put(session)
 
-    revoked = registry.revoke(session.session_id)
+    revoked = registry.revoke_session(session.session_id)
     loaded = registry.get(session.session_id)
 
     assert revoked is not None
     assert revoked.is_revoked is True
     assert loaded is not None
     assert loaded.is_revoked is True
+
+
+def test_record_access_updates_bounded_audit_fields_deterministically() -> None:
+    """Successful continuation access should increment pages and update last-access time."""
+    now_state = {"value": 1_700_000_000_000}
+    registry = InMemoryPaginationSessionRegistry(now_ms=lambda: now_state["value"])
+    session = create_pagination_session(
+        tenant_id="tenant-10",
+        provider_name="postgres",
+        pagination_mode="offset",
+        query_scope_fp="scope-fp-10",
+        policy_snapshot_fp="policy-fp-10",
+        revocation_epoch=0,
+        now_epoch_milliseconds=now_state["value"],
+    )
+    registry.put(session)
+
+    now_state["value"] = 1_700_000_000_150
+    first = registry.record_access(session.session_id)
+    now_state["value"] = 1_700_000_000_300
+    second = registry.record_access(session.session_id)
+
+    assert first is not None
+    assert first.pages_served_count == 1
+    assert first.last_accessed_at_ms == 1_700_000_000_150
+    assert second is not None
+    assert second.pages_served_count == 2
+    assert second.last_accessed_at_ms == 1_700_000_000_300
+
+
+def test_record_access_returns_none_for_revoked_session() -> None:
+    """Revoked sessions must not advance audit counters on access attempts."""
+    now_state = {"value": 1_700_000_000_000}
+    registry = InMemoryPaginationSessionRegistry(now_ms=lambda: now_state["value"])
+    session = create_pagination_session(
+        tenant_id="tenant-11",
+        provider_name="postgres",
+        pagination_mode="keyset",
+        query_scope_fp="scope-fp-11",
+        policy_snapshot_fp="policy-fp-11",
+        revocation_epoch=0,
+        now_epoch_milliseconds=now_state["value"],
+    )
+    registry.put(session)
+    registry.revoke_session(session.session_id)
+    now_state["value"] = 1_700_000_000_200
+
+    updated = registry.record_access(session.session_id)
+    loaded = registry.get(session.session_id)
+
+    assert updated is None
+    assert loaded is not None
+    assert loaded.is_revoked is True
+    assert loaded.pages_served_count == 0
+    assert loaded.last_accessed_at_ms is None
