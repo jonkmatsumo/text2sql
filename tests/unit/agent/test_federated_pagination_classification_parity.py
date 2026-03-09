@@ -16,6 +16,10 @@ from agent.nodes.execute import validate_and_execute_node
 from agent.state import AgentState
 from dal.capabilities import BackendCapabilities
 from dal.keyset_pagination import encode_keyset_cursor
+from dal.pagination_session import (
+    create_pagination_session,
+    get_default_pagination_session_registry,
+)
 from mcp_server.tools.execute_sql_query import _validate_sql_ast_failure
 from mcp_server.tools.execute_sql_query import handler as mcp_execute_sql_query_handler
 
@@ -32,6 +36,37 @@ _BUDGET_SNAPSHOT = {
     "consumed_bytes": 0,
     "consumed_duration_ms": 0,
 }
+
+
+def _default_policy_snapshot_fp() -> str:
+    payload = {
+        "tenant_enforcement_mode": "rls_session",
+        "tenant_rewrite_outcome": "APPLIED",
+        "tenant_rewrite_reason_code": None,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    return digest[:32]
+
+
+def _register_pagination_session(
+    *,
+    pagination_mode: str,
+    query_scope_fp: str = _TEST_SCOPE_FP,
+    provider_name: str = "federated-db",
+    tenant_id: int = 1,
+) -> str:
+    session = create_pagination_session(
+        tenant_id=str(tenant_id),
+        provider_name=provider_name,
+        pagination_mode=pagination_mode,
+        query_scope_fp=query_scope_fp,
+        policy_snapshot_fp=_default_policy_snapshot_fp(),
+        revocation_epoch=0,
+    )
+    get_default_pagination_session_registry().put(session)
+    return session.session_id
 
 
 class _BackendSetConn:
@@ -161,6 +196,8 @@ def _tamper_keyset_cursor(
     max_age_s: int | None = None,
     kid: str | None = None,
     drop_kid: bool = False,
+    pagination_session_id: str | None = None,
+    drop_pagination_session_id: bool = False,
     secret: str = _TEST_SECRET,
 ) -> str:
     """Mutate keyset cursor payload fields and re-sign for regression coverage."""
@@ -188,6 +225,10 @@ def _tamper_keyset_cursor(
         payload["kid"] = kid
     if drop_kid:
         payload.pop("kid", None)
+    if pagination_session_id is not None:
+        payload["pagination_session_id"] = pagination_session_id
+    if drop_pagination_session_id:
+        payload.pop("pagination_session_id", None)
     if secret:
         sig_data = json.dumps(payload, sort_keys=True)
         payload["s"] = _hmac.new(secret.encode(), sig_data.encode(), hashlib.sha256).hexdigest()
@@ -531,6 +572,140 @@ async def test_cursor_scope_mismatch_classification_parity_between_mcp_and_agent
         mcp_result = await _invoke_mcp_federated_keyset(caps, keyset_cursor=cursor)
 
     await _assert_agent_reason_parity(mcp_result, "PAGINATION_CURSOR_SCOPE_MISMATCH")
+
+
+@pytest.mark.asyncio
+async def test_pagination_session_missing_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for missing pagination session ids."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    get_default_pagination_session_registry().clear()
+    with patch(
+        "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+        return_value=_TEST_SCOPE_FP,
+    ):
+        page_one = await _invoke_mcp_federated_keyset(caps)
+        assert "error" not in page_one
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+        missing_session_cursor = _tamper_keyset_cursor(cursor, drop_pagination_session_id=True)
+        mcp_result = await _invoke_mcp_federated_keyset(
+            caps,
+            keyset_cursor=missing_session_cursor,
+        )
+
+    await _assert_agent_reason_parity(mcp_result, "PAGINATION_SESSION_MISSING")
+
+
+@pytest.mark.asyncio
+async def test_pagination_session_unknown_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for unknown pagination sessions."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    get_default_pagination_session_registry().clear()
+    with patch(
+        "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+        return_value=_TEST_SCOPE_FP,
+    ):
+        page_one = await _invoke_mcp_federated_keyset(caps)
+        assert "error" not in page_one
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+        unknown_session_cursor = _tamper_keyset_cursor(
+            cursor,
+            pagination_session_id="unknownsessionid123456",
+        )
+        mcp_result = await _invoke_mcp_federated_keyset(
+            caps,
+            keyset_cursor=unknown_session_cursor,
+        )
+
+    await _assert_agent_reason_parity(mcp_result, "PAGINATION_SESSION_UNKNOWN")
+
+
+@pytest.mark.asyncio
+async def test_pagination_session_revoked_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for revoked pagination sessions."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    registry = get_default_pagination_session_registry()
+    registry.clear()
+    with patch(
+        "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+        return_value=_TEST_SCOPE_FP,
+    ):
+        page_one = await _invoke_mcp_federated_keyset(caps)
+        assert "error" not in page_one
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        session_id = page_one["metadata"]["pagination_session_id"]
+        assert isinstance(session_id, str) and session_id
+        assert cursor
+        revoked = registry.revoke_session(session_id)
+        assert revoked is not None and revoked.is_revoked is True
+        mcp_result = await _invoke_mcp_federated_keyset(caps, keyset_cursor=cursor)
+
+    await _assert_agent_reason_parity(mcp_result, "PAGINATION_SESSION_REVOKED")
+
+
+@pytest.mark.asyncio
+async def test_pagination_session_scope_mismatch_classification_parity_between_mcp_and_agent():
+    """Agent must preserve MCP classification for pagination session scope mismatches."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=True,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_column_metadata=True,
+        supports_pagination=True,
+    )
+    registry = get_default_pagination_session_registry()
+    registry.clear()
+    with patch(
+        "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+        return_value=_TEST_SCOPE_FP,
+    ):
+        page_one = await _invoke_mcp_federated_keyset(caps)
+        assert "error" not in page_one
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+        offset_session_id = _register_pagination_session(
+            pagination_mode="offset",
+            query_scope_fp=_TEST_SCOPE_FP,
+            provider_name="federated-db",
+            tenant_id=1,
+        )
+        scope_mismatch_cursor = _tamper_keyset_cursor(
+            cursor,
+            pagination_session_id=offset_session_id,
+        )
+        mcp_result = await _invoke_mcp_federated_keyset(
+            caps,
+            keyset_cursor=scope_mismatch_cursor,
+        )
+
+    await _assert_agent_reason_parity(mcp_result, "PAGINATION_SESSION_SCOPE_MISMATCH")
 
 
 @pytest.mark.asyncio
