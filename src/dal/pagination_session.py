@@ -196,7 +196,7 @@ class InMemoryPaginationSessionRegistry(PaginationSessionRegistry):
 
     def get(self, session_id: str) -> PaginationSession | None:
         """Return a non-expired session by id, or None when absent/invalid."""
-        normalized_session_id = _normalize_session_id(session_id)
+        normalized_session_id = normalize_pagination_session_id(session_id)
         if normalized_session_id is None:
             return None
         now_ms = self._safe_now_ms()
@@ -221,7 +221,7 @@ class InMemoryPaginationSessionRegistry(PaginationSessionRegistry):
 
     def revoke(self, session_id: str) -> PaginationSession | None:
         """Mark a stored session revoked and return the updated session object."""
-        normalized_session_id = _normalize_session_id(session_id)
+        normalized_session_id = normalize_pagination_session_id(session_id)
         if normalized_session_id is None:
             return None
         now_ms = self._safe_now_ms()
@@ -272,7 +272,8 @@ def get_default_pagination_session_registry() -> InMemoryPaginationSessionRegist
         return _DEFAULT_REGISTRY
 
 
-def _normalize_session_id(session_id: str) -> str | None:
+def normalize_pagination_session_id(session_id: str) -> str | None:
+    """Normalize and bounds-check a pagination session id."""
     if not isinstance(session_id, str):
         return None
     normalized = session_id.strip()

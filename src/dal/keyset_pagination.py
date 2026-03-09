@@ -47,6 +47,7 @@ from dal.pagination_cursor import (
     normalize_optional_int,
     register_cursor_nonce_once,
 )
+from dal.pagination_session import normalize_pagination_session_id
 
 KEYSET_ORDER_BY_REQUIRED = "KEYSET_ORDER_BY_REQUIRED"
 KEYSET_ORDER_BY_UNSAFE_EXPRESSION = "KEYSET_ORDER_BY_UNSAFE_EXPRESSION"
@@ -291,6 +292,22 @@ def _derive_legacy_keyset_nonce(payload: Dict[str, Any]) -> str:
     return f"legacy-{hashlib.sha256(seed_bytes).hexdigest()[:32]}"
 
 
+def _derive_legacy_keyset_session_id(payload: Dict[str, Any]) -> str:
+    """Derive deterministic bounded session id for legacy payload migration."""
+    seed = {
+        "v": payload.get("v"),
+        "k": payload.get("k"),
+        "f": payload.get("f"),
+        "issued_at_ms": payload.get("issued_at_ms"),
+        "ttl_ms": payload.get("ttl_ms"),
+        "query_fp": payload.get("query_fp"),
+        "scope_fp": payload.get("scope_fp"),
+        "nonce": payload.get("nonce"),
+    }
+    seed_bytes = json.dumps(seed, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return f"legacy_{hashlib.sha256(seed_bytes).hexdigest()[:32]}"
+
+
 def _migrate_keyset_payload_v0_to_v1(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Migrate legacy keyset payloads to explicit v1 envelope fields."""
     values = _extract_first_present(payload, "v", "values")
@@ -356,6 +373,22 @@ def _migrate_keyset_payload_v0_to_v1(payload: Dict[str, Any]) -> Dict[str, Any]:
     query_fp = str(query_fp_raw).strip() if isinstance(query_fp_raw, str) else ""
     scope_fp = normalize_cursor_scope_fingerprint(_extract_first_present(payload, "scope_fp"))
     kid = normalize_cursor_kid(_extract_first_present(payload, "kid"))
+    pagination_session_id = normalize_pagination_session_id(
+        _extract_first_present(payload, "pagination_session_id")
+    )
+    if pagination_session_id is None:
+        pagination_session_id = _derive_legacy_keyset_session_id(
+            {
+                "v": values,
+                "k": normalized_keys,
+                "f": fingerprint,
+                "issued_at_ms": int(issued_at_ms),
+                "ttl_ms": int(ttl_ms),
+                "query_fp": _extract_first_present(payload, "query_fp"),
+                "scope_fp": _extract_first_present(payload, "scope_fp"),
+                "nonce": nonce,
+            }
+        )
     cursor_context = _normalize_cursor_context(
         _extract_first_present(payload, "c", "cursor_context")
     )
@@ -371,6 +404,7 @@ def _migrate_keyset_payload_v0_to_v1(payload: Dict[str, Any]) -> Dict[str, Any]:
         "issued_at": int(issued_at_ms) // 1000,
         "max_age_s": max(1, int(ttl_ms) // 1000),
         "nonce": nonce,
+        "pagination_session_id": pagination_session_id,
     }
     if query_fp:
         migrated_payload["query_fp"] = query_fp
@@ -438,6 +472,7 @@ def encode_keyset_cursor(
     query_fp: str | None = None,
     scope_fp: str | None = None,
     budget_snapshot: Dict[str, Any] | None = None,
+    pagination_session_id: str | None = None,
 ) -> str:
     """Encode keyset values and keys into an opaque base64 cursor."""
     signing_secret = (secret or "").strip()
@@ -495,6 +530,9 @@ def encode_keyset_cursor(
         raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_KID_MISSING}.")
     payload["kid"] = normalized_kid
     payload["nonce"] = normalize_cursor_nonce(nonce) or build_cursor_nonce()
+    normalized_session_id = normalize_pagination_session_id(pagination_session_id)
+    if normalized_session_id is not None:
+        payload["pagination_session_id"] = normalized_session_id
     normalized_query_fp = str(query_fp).strip() if isinstance(query_fp, str) else ""
     if normalized_query_fp:
         payload["query_fp"] = normalized_query_fp
@@ -723,6 +761,11 @@ def decode_keyset_cursor(
             decode_metadata["budget_snapshot"] = None
         if payload.get("f") != expected_fingerprint:
             raise ValueError("Invalid cursor: fingerprint mismatch.")
+        pagination_session_id = normalize_pagination_session_id(
+            payload.get("pagination_session_id")
+        )
+        if isinstance(decode_metadata, dict):
+            decode_metadata["pagination_session_id"] = pagination_session_id
         if expected_keys is not None:
             raw_keys = payload.get("k", [])
             payload_keys = raw_keys if isinstance(raw_keys, list) else []

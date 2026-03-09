@@ -7,6 +7,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from dal.pagination_session import (
+    create_pagination_session,
+    get_default_pagination_session_registry,
+)
 from mcp_server.tools.execute_sql_query import handler
 
 _TEST_SECRET = "test-pagination-secret-for-unit-tests-2026"
@@ -21,6 +25,26 @@ _BUDGET_SNAPSHOT = {
 }
 
 pytestmark = pytest.mark.pagination
+
+
+def _register_pagination_session(
+    *,
+    tenant_id: int = 1,
+    provider_name: str = "postgres",
+    pagination_mode: str = "keyset",
+    query_scope_fp: str = _TEST_SCOPE_FP,
+) -> str:
+    session = create_pagination_session(
+        tenant_id=str(tenant_id),
+        provider_name=provider_name,
+        pagination_mode=pagination_mode,
+        query_scope_fp=query_scope_fp,
+        policy_snapshot_fp="policy-fp-tests",
+        revocation_epoch=0,
+        now_epoch_milliseconds=1_700_000_000_000,
+    )
+    get_default_pagination_session_registry().put(session)
+    return session.session_id
 
 
 @pytest.mark.asyncio
@@ -878,6 +902,7 @@ async def test_execute_sql_query_keyset_cursor_invalid_fingerprint():
             scope_fp=_TEST_SCOPE_FP,
             secret=_TEST_SECRET,
             budget_snapshot=_BUDGET_SNAPSHOT,
+            pagination_session_id=_register_pagination_session(),
         )
 
         sql = "SELECT id FROM users ORDER BY id ASC"
@@ -943,6 +968,7 @@ async def test_execute_sql_query_keyset_cursor_expired_reason_code_stable():
             scope_fp=_TEST_SCOPE_FP,
             secret=_TEST_SECRET,
             budget_snapshot=_BUDGET_SNAPSHOT,
+            pagination_session_id=_register_pagination_session(),
         )
 
         payload = await handler(
@@ -1008,6 +1034,7 @@ async def test_execute_sql_query_keyset_cursor_clock_skew_reason_code_stable():
             scope_fp=_TEST_SCOPE_FP,
             secret=_TEST_SECRET,
             budget_snapshot=_BUDGET_SNAPSHOT,
+            pagination_session_id=_register_pagination_session(),
         )
 
         payload = await handler(
@@ -1077,6 +1104,7 @@ async def test_execute_sql_query_keyset_cursor_query_fp_mismatch_reason_code_sta
             scope_fp=_TEST_SCOPE_FP,
             secret=_TEST_SECRET,
             budget_snapshot=_BUDGET_SNAPSHOT,
+            pagination_session_id=_register_pagination_session(),
         )
 
         payload = await handler(
@@ -1228,12 +1256,15 @@ async def test_execute_sql_query_keyset_budget_snapshot_valid_continuation():
         page_one = json.loads(
             await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
         )
+        session_id = page_one["metadata"].get("pagination_session_id")
+        assert isinstance(session_id, str) and session_id
         cursor = page_one["metadata"]["next_keyset_cursor"]
         assert cursor
         padded = cursor + "=" * (-len(cursor) % 4)
         cursor_payload = json.loads(
             base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
         )
+        assert cursor_payload.get("pagination_session_id") == session_id
         assert isinstance(cursor_payload.get("budget_snapshot"), dict)
         assert isinstance(cursor_payload.get("budget_fp"), str)
 
@@ -1249,6 +1280,7 @@ async def test_execute_sql_query_keyset_budget_snapshot_valid_continuation():
 
     assert "error" not in page_two
     assert page_two["rows"] == [{"id": 3}]
+    assert page_two["metadata"].get("pagination_session_id") == session_id
 
 
 @pytest.mark.asyncio
@@ -1394,6 +1426,7 @@ async def test_execute_sql_query_keyset_cursor_rejects_order_mismatch():
             scope_fp=_TEST_SCOPE_FP,
             secret=_TEST_SECRET,
             budget_snapshot=_BUDGET_SNAPSHOT,
+            pagination_session_id=_register_pagination_session(),
         )
         payload = await handler(
             "SELECT id FROM users ORDER BY id DESC",
@@ -3409,6 +3442,7 @@ async def test_execute_sql_query_keyset_rewrite_applied():
             scope_fp=_TEST_SCOPE_FP,
             secret=_TEST_SECRET,
             budget_snapshot=_BUDGET_SNAPSHOT,
+            pagination_session_id=_register_pagination_session(),
         )
 
         await handler(

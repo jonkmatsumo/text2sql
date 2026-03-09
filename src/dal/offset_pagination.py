@@ -46,6 +46,7 @@ from dal.pagination_cursor import (
     normalize_optional_int,
     register_cursor_nonce_once,
 )
+from dal.pagination_session import normalize_pagination_session_id
 
 PAGINATION_CURSOR_QUERY_MISMATCH = "PAGINATION_CURSOR_QUERY_MISMATCH"
 
@@ -75,6 +76,7 @@ class OffsetPaginationToken:
     kid: str | None = None
     query_fingerprint: str | None = None
     budget_snapshot: dict[str, Any] | None = None
+    pagination_session_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +117,23 @@ def _derived_legacy_offset_nonce(payload: dict[str, Any]) -> str:
     seed_bytes = json.dumps(nonce_seed, separators=(",", ":"), sort_keys=True).encode("utf-8")
     digest = hashlib.sha256(seed_bytes).hexdigest()[:32]
     return f"legacy-{digest}"
+
+
+def _derived_legacy_offset_session_id(payload: dict[str, Any]) -> str:
+    """Derive deterministic bounded session id for legacy payload migration."""
+    seed = {
+        "o": payload.get("o"),
+        "l": payload.get("l"),
+        "f": payload.get("f"),
+        "issued_at_ms": payload.get("issued_at_ms"),
+        "ttl_ms": payload.get("ttl_ms"),
+        "query_fp": payload.get("query_fp"),
+        "scope_fp": payload.get("scope_fp"),
+        "nonce": payload.get("nonce"),
+    }
+    seed_bytes = json.dumps(seed, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    digest = hashlib.sha256(seed_bytes).hexdigest()[:32]
+    return f"legacy_{digest}"
 
 
 def _migrate_offset_payload_v0_to_v1(payload: dict[str, Any]) -> dict[str, Any]:
@@ -166,6 +185,22 @@ def _migrate_offset_payload_v0_to_v1(payload: dict[str, Any]) -> dict[str, Any]:
     query_fp = str(query_fp_raw).strip() if isinstance(query_fp_raw, str) else ""
     scope_fp = normalize_cursor_scope_fingerprint(_extract_first_present(payload, "scope_fp"))
     kid = normalize_cursor_kid(_extract_first_present(payload, "kid"))
+    pagination_session_id = normalize_pagination_session_id(
+        _extract_first_present(payload, "pagination_session_id")
+    )
+    if pagination_session_id is None:
+        pagination_session_id = _derived_legacy_offset_session_id(
+            {
+                "o": int(offset),
+                "l": int(limit),
+                "f": fingerprint,
+                "issued_at_ms": int(issued_at_ms),
+                "ttl_ms": int(ttl_ms),
+                "query_fp": _extract_first_present(payload, "query_fp"),
+                "scope_fp": _extract_first_present(payload, "scope_fp"),
+                "nonce": nonce,
+            }
+        )
 
     migrated_payload: dict[str, Any] = {
         "cursor_version": _OFFSET_CURSOR_CURRENT_VERSION,
@@ -179,6 +214,7 @@ def _migrate_offset_payload_v0_to_v1(payload: dict[str, Any]) -> dict[str, Any]:
         "issued_at": int(issued_at_ms) // 1000,
         "max_age_s": max(1, int(ttl_ms) // 1000),
         "nonce": nonce,
+        "pagination_session_id": pagination_session_id,
     }
     if query_fp:
         migrated_payload["query_fp"] = query_fp
@@ -297,6 +333,7 @@ def encode_offset_pagination_token(
     query_fp: str | None = None,
     scope_fp: str | None = None,
     budget_snapshot: dict[str, Any] | None = None,
+    pagination_session_id: str | None = None,
 ) -> str:
     """Encode a deterministic opaque pagination token."""
     signing_secret = (secret or "").strip()
@@ -359,6 +396,9 @@ def encode_offset_pagination_token(
     payload["kid"] = normalized_kid
     normalized_nonce = normalize_cursor_nonce(nonce) or build_cursor_nonce()
     payload["nonce"] = normalized_nonce
+    normalized_session_id = normalize_pagination_session_id(pagination_session_id)
+    if normalized_session_id is not None:
+        payload["pagination_session_id"] = normalized_session_id
     normalized_query_fp = str(query_fp).strip() if isinstance(query_fp, str) else ""
     if normalized_query_fp:
         payload["query_fp"] = normalized_query_fp
@@ -658,6 +698,9 @@ def decode_offset_pagination_token(
             message="Pagination token does not match the current query.",
         )
     nonce = normalize_cursor_nonce(payload.get("nonce"))
+    pagination_session_id = normalize_pagination_session_id(payload.get("pagination_session_id"))
+    if isinstance(decode_metadata, dict):
+        decode_metadata["pagination_session_id"] = pagination_session_id
     if replay_guard_enabled:
         if nonce is None:
             if isinstance(decode_metadata, dict):
@@ -695,4 +738,5 @@ def decode_offset_pagination_token(
         kid=payload_kid,
         query_fingerprint=query_fingerprint,
         budget_snapshot=normalized_budget_snapshot,
+        pagination_session_id=pagination_session_id,
     )

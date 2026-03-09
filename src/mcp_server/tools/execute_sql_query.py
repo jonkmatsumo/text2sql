@@ -79,6 +79,14 @@ from dal.pagination_cursor import (
     CursorSigningKeyring,
     build_cursor_scope_fingerprint,
 )
+from dal.pagination_session import (
+    PAGINATION_SESSION_MISSING,
+    PAGINATION_SESSION_REVOKED,
+    PAGINATION_SESSION_UNKNOWN,
+    create_pagination_session,
+    get_default_pagination_session_registry,
+    normalize_pagination_session_id,
+)
 from dal.postgres_sandbox import (
     SANDBOX_FAILURE_NONE,
     SANDBOX_FAILURE_REASON_ALLOWLIST,
@@ -185,6 +193,9 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     PAGINATION_CURSOR_KIND_UNSUPPORTED,
     PAGINATION_CURSOR_MIGRATION_PATH_MISSING,
     PAGINATION_CURSOR_MIGRATION_UNSAFE,
+    PAGINATION_SESSION_MISSING,
+    PAGINATION_SESSION_UNKNOWN,
+    PAGINATION_SESSION_REVOKED,
     "KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING",
     PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED,
     PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED,
@@ -275,6 +286,9 @@ _CURSOR_DECODE_REASON_CODE_ALLOWLIST = {
     PAGINATION_CURSOR_KIND_UNSUPPORTED,
     PAGINATION_CURSOR_MIGRATION_PATH_MISSING,
     PAGINATION_CURSOR_MIGRATION_UNSAFE,
+    PAGINATION_SESSION_MISSING,
+    PAGINATION_SESSION_UNKNOWN,
+    PAGINATION_SESSION_REVOKED,
     "KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING",
     PAGINATION_BUDGET_SNAPSHOT_INVALID,
 }
@@ -969,6 +983,9 @@ def _cursor_validation_outcome_from_reason_code(reason_code: Any) -> str | None:
         PAGINATION_CURSOR_KIND_UNSUPPORTED: "INVALID",
         PAGINATION_CURSOR_MIGRATION_PATH_MISSING: "INVALID",
         PAGINATION_CURSOR_MIGRATION_UNSAFE: "INVALID",
+        PAGINATION_SESSION_MISSING: "INVALID",
+        PAGINATION_SESSION_UNKNOWN: "INVALID",
+        PAGINATION_SESSION_REVOKED: "INVALID",
         "KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING": "INVALID",
     }
     return mapping.get(reason)
@@ -1083,6 +1100,23 @@ def _apply_cursor_decode_metadata(
     }:
         envelope_metadata["pagination.cursor.migration_outcome"] = "rejected"
         envelope_metadata.setdefault("pagination.cursor.migration_attempted", True)
+
+
+def _validate_pagination_session_binding(
+    *,
+    session_id: Any,
+    registry: Any,
+) -> tuple[Any | None, str | None]:
+    """Validate continuation cursor session binding against the server registry."""
+    normalized_session_id = normalize_pagination_session_id(session_id)
+    if normalized_session_id is None:
+        return None, PAGINATION_SESSION_MISSING
+    session = registry.get(normalized_session_id)
+    if session is None:
+        return None, PAGINATION_SESSION_UNKNOWN
+    if bool(getattr(session, "is_revoked", False)):
+        return None, PAGINATION_SESSION_REVOKED
+    return session, None
 
 
 def _normalize_keyset_context_value(value: Any) -> str | None:
@@ -2552,6 +2586,7 @@ async def handler(
         "pagination_mode_requested": pagination_mode,
         "pagination_mode_used": pagination_mode,
         "next_keyset_cursor": None,
+        "pagination_session_id": None,
         "execution_timeout_applied": execution_timeout_applied,
         "execution_timeout_triggered": False,
         "resource_capability_mismatch": None,
@@ -3417,6 +3452,15 @@ async def handler(
         query_fingerprint = None  # Bound to backend signature inside connection block
         cursor_query_fingerprint = None
         cursor_scope_fingerprint = None
+        pagination_session = None
+        pagination_session_id: str | None = None
+        pagination_session_registry = get_default_pagination_session_registry()
+        pagination_session_continuation_requested = bool(page_token or keyset_cursor)
+        pagination_session_binding_enabled = bool(
+            pagination_session_continuation_requested
+            or page_size is not None
+            or pagination_mode == "keyset"
+        )
 
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
             keyset_cursor_context = _extract_keyset_cursor_context(conn)
@@ -3467,6 +3511,37 @@ async def handler(
                 order_signature=keyset_signature_for_fingerprint,
                 backend_signature=backend_signature,
             )
+            if pagination_session_binding_enabled and not pagination_session_continuation_requested:
+                policy_snapshot_payload = {
+                    "tenant_enforcement_mode": tenant_enforcement_metadata.get(
+                        "tenant_enforcement_mode"
+                    ),
+                    "tenant_rewrite_outcome": tenant_enforcement_metadata.get(
+                        "tenant_rewrite_outcome"
+                    ),
+                    "tenant_rewrite_reason_code": tenant_enforcement_metadata.get(
+                        "tenant_rewrite_reason_code"
+                    ),
+                }
+                policy_snapshot_fp = hashlib.sha256(
+                    json.dumps(
+                        policy_snapshot_payload,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                        default=str,
+                    ).encode("utf-8")
+                ).hexdigest()[:32]
+                pagination_session = create_pagination_session(
+                    tenant_id=(str(tenant_id) if tenant_id is not None else None),
+                    provider_name=provider,
+                    pagination_mode=pagination_mode,
+                    query_scope_fp=cursor_scope_fingerprint or cursor_query_fingerprint or "scope",
+                    policy_snapshot_fp=policy_snapshot_fp,
+                    revocation_epoch=0,
+                )
+                pagination_session_registry.put(pagination_session)
+                pagination_session_id = pagination_session.session_id
+                tenant_enforcement_metadata["pagination_session_id"] = pagination_session_id
             raw_session_guardrail_metadata = getattr(conn, "session_guardrail_metadata", {})
             if isinstance(raw_session_guardrail_metadata, dict):
                 session_guardrail_metadata = {
@@ -3769,6 +3844,34 @@ async def handler(
                     _apply_cursor_decode_metadata(
                         tenant_enforcement_metadata, keyset_decode_metadata
                     )
+                    (
+                        pagination_session,
+                        pagination_session_reason_code,
+                    ) = _validate_pagination_session_binding(
+                        session_id=keyset_decode_metadata.get("pagination_session_id"),
+                        registry=pagination_session_registry,
+                    )
+                    if pagination_session_reason_code is not None:
+                        _apply_cursor_decode_metadata(
+                            tenant_enforcement_metadata,
+                            keyset_decode_metadata,
+                            fallback_reason_code=pagination_session_reason_code,
+                        )
+                        tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
+                            pagination_session_reason_code
+                        )
+                        return _construct_error_response(
+                            execution_started_at,
+                            message="Pagination cursor session validation failed.",
+                            category=ErrorCategory.INVALID_REQUEST,
+                            provider=provider,
+                            metadata={"reason_code": pagination_session_reason_code},
+                            envelope_metadata=tenant_enforcement_metadata,
+                        )
+                    pagination_session_id = normalize_pagination_session_id(
+                        keyset_decode_metadata.get("pagination_session_id")
+                    )
+                    tenant_enforcement_metadata["pagination_session_id"] = pagination_session_id
                     try:
                         execution_budget = ExecutionBudget.from_snapshot(
                             keyset_decode_metadata.get("budget_snapshot")
@@ -3847,6 +3950,7 @@ async def handler(
                 """Fetch rows from the database."""
                 nonlocal columns, next_token, offset_decode_metadata, offset_next_token_payload
                 nonlocal execution_budget
+                nonlocal pagination_session, pagination_session_id
                 fetch_page = getattr(conn, "fetch_page", None)
                 fetch_page_with_columns = getattr(conn, "fetch_page_with_columns", None)
                 offset_pagination_requested = pagination_mode == "offset" and bool(
@@ -3920,6 +4024,20 @@ async def handler(
                             ),
                             expected_scope_fp=cursor_scope_fingerprint,
                         )
+                        (
+                            pagination_session,
+                            pagination_session_reason_code,
+                        ) = _validate_pagination_session_binding(
+                            session_id=token_payload.pagination_session_id,
+                            registry=pagination_session_registry,
+                        )
+                        if pagination_session_reason_code is not None:
+                            raise OffsetPaginationTokenError(
+                                reason_code=pagination_session_reason_code,
+                                message="Pagination token session validation failed.",
+                            )
+                        pagination_session_id = token_payload.pagination_session_id
+                        tenant_enforcement_metadata["pagination_session_id"] = pagination_session_id
                         pagination_offset = token_payload.offset
                         pagination_limit = token_payload.limit
                         try:
@@ -4175,6 +4293,7 @@ async def handler(
                 query_fp=(cursor_query_fingerprint if cursor_bind_query_fingerprint else None),
                 scope_fp=cursor_scope_fingerprint,
                 budget_snapshot=execution_budget.to_snapshot(),
+                pagination_session_id=pagination_session_id,
             )
 
         if include_columns and not columns:
@@ -4256,6 +4375,7 @@ async def handler(
                     query_fp=(cursor_query_fingerprint if cursor_bind_query_fingerprint else None),
                     scope_fp=cursor_scope_fingerprint,
                     budget_snapshot=execution_budget.to_snapshot(),
+                    pagination_session_id=pagination_session_id,
                 )
                 tenant_enforcement_metadata["next_keyset_cursor"] = next_keyset_cursor
                 tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = True
@@ -4356,6 +4476,7 @@ async def handler(
             ),
             pagination_mode_requested=tenant_enforcement_metadata.get("pagination_mode_requested"),
             pagination_mode_used=tenant_enforcement_metadata.get("pagination_mode_used"),
+            pagination_session_id=tenant_enforcement_metadata.get("pagination_session_id"),
             next_keyset_cursor=tenant_enforcement_metadata.get("next_keyset_cursor"),
             **{
                 "pagination.keyset.partial_page": tenant_enforcement_metadata.get(

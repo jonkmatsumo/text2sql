@@ -28,6 +28,10 @@ from dal.pagination_cursor import (
     PAGINATION_CURSOR_VERSION_UNSUPPORTED,
     CursorMigrationRegistry,
 )
+from dal.pagination_session import (
+    create_pagination_session,
+    get_default_pagination_session_registry,
+)
 from mcp_server.tools.execute_sql_query import handler
 
 _TEST_SECRET = "test-pagination-secret-for-unit-tests-2026"
@@ -45,9 +49,28 @@ _CURSOR_MIGRATION_FIXTURE_DIR = (
 )
 
 
+def _register_offset_pagination_session(
+    *,
+    tenant_id: int = 1,
+    query_scope_fp: str = _TEST_SCOPE_FP,
+) -> str:
+    session = create_pagination_session(
+        tenant_id=str(tenant_id),
+        provider_name="postgres",
+        pagination_mode="offset",
+        query_scope_fp=query_scope_fp,
+        policy_snapshot_fp="policy-fp-tests",
+        revocation_epoch=0,
+        now_epoch_milliseconds=1_700_000_000_000,
+    )
+    get_default_pagination_session_registry().put(session)
+    return session.session_id
+
+
 def _encode_legacy_offset_token(payload: dict[str, object], *, sign: bool = True) -> str:
     normalized_payload = dict(payload)
     normalized_payload.setdefault("kid", "legacy")
+    normalized_payload.setdefault("pagination_session_id", _register_offset_pagination_session())
     wrapper: dict[str, object] = {"p": normalized_payload}
     if sign:
         inner = json.dumps(normalized_payload, separators=(",", ":"), sort_keys=True).encode(
@@ -542,6 +565,7 @@ async def test_execute_sql_query_offset_pagination_offset_cap_enforced(monkeypat
         secret=_TEST_SECRET,
         scope_fp=_TEST_SCOPE_FP,
         budget_snapshot=_BUDGET_SNAPSHOT,
+        pagination_session_id=_register_offset_pagination_session(),
     )
 
     with (
@@ -614,6 +638,7 @@ async def test_execute_sql_query_offset_pagination_rejects_expired_cursor_stable
         secret=_TEST_SECRET,
         scope_fp=_TEST_SCOPE_FP,
         budget_snapshot=_BUDGET_SNAPSHOT,
+        pagination_session_id=_register_offset_pagination_session(),
     )
 
     with (
@@ -1035,6 +1060,7 @@ async def test_execute_sql_query_offset_rejects_when_migration_path_is_missing(m
         secret=_TEST_SECRET,
         scope_fp=_TEST_SCOPE_FP,
         budget_snapshot=_BUDGET_SNAPSHOT,
+        pagination_session_id=_register_offset_pagination_session(),
     )
     patched_registry = CursorMigrationRegistry(current_versions={"offset": 2})
     patched_registry.register(
@@ -1287,6 +1313,7 @@ async def test_execute_sql_query_offset_pagination_query_fp_mismatch_in_strict_m
         secret=_TEST_SECRET,
         scope_fp=_TEST_SCOPE_FP,
         budget_snapshot=_BUDGET_SNAPSHOT,
+        pagination_session_id=_register_offset_pagination_session(),
     )
     monkeypatch.setenv("PAGINATION_CURSOR_BIND_QUERY_FINGERPRINT", "true")
 
@@ -1366,6 +1393,7 @@ async def test_execute_sql_query_offset_budget_snapshot_tamper_is_rejected():
         secret=_TEST_SECRET,
         scope_fp=_TEST_SCOPE_FP,
         budget_snapshot=_BUDGET_SNAPSHOT,
+        pagination_session_id=_register_offset_pagination_session(),
     )
 
     padded = token + "=" * (-len(token) % 4)
@@ -1535,6 +1563,7 @@ async def test_execute_sql_query_offset_cursor_telemetry_parity_deterministic_cl
         secret=_TEST_SECRET,
         scope_fp=_TEST_SCOPE_FP,
         budget_snapshot=_BUDGET_SNAPSHOT,
+        pagination_session_id=_register_offset_pagination_session(),
     )
 
     with (

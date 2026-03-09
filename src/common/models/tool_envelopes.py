@@ -132,6 +132,9 @@ class ExecuteSQLQueryMetadata(BaseModel):
     pagination_mode_requested: Optional[Literal["offset", "keyset"]] = Field(
         None, description="The pagination strategy requested by the caller"
     )
+    pagination_session_id: Optional[str] = Field(
+        None, description="Server-issued pagination session id bound to this pagination chain"
+    )
     next_keyset_cursor: Optional[str] = Field(
         None, description="Opaque cursor for the next page when using keyset pagination"
     )

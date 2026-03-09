@@ -19,6 +19,10 @@ import pytest
 from dal.keyset_pagination import encode_keyset_cursor
 from dal.offset_pagination import encode_offset_pagination_token
 from dal.pagination_cursor import PAGINATION_CURSOR_SECRET_MISSING, PAGINATION_CURSOR_SECRET_WEAK
+from dal.pagination_session import (
+    create_pagination_session,
+    get_default_pagination_session_registry,
+)
 from mcp_server.tools.execute_sql_query import handler
 
 pytestmark = pytest.mark.pagination
@@ -67,6 +71,25 @@ def _make_conn(rows: list[dict] | None = None):
 @asynccontextmanager
 async def _conn_ctx(conn):
     yield conn
+
+
+def _register_pagination_session(
+    *,
+    tenant_id: int = 1,
+    pagination_mode: str,
+    query_scope_fp: str = "telemetry-scope-fp",
+) -> str:
+    session = create_pagination_session(
+        tenant_id=str(tenant_id),
+        provider_name="postgres",
+        pagination_mode=pagination_mode,
+        query_scope_fp=query_scope_fp,
+        policy_snapshot_fp="policy-fp-tests",
+        revocation_epoch=0,
+        now_epoch_milliseconds=1_700_000_000_000,
+    )
+    get_default_pagination_session_registry().put(session)
+    return session.session_id
 
 
 # ---------------------------------------------------------------------------
@@ -748,6 +771,10 @@ async def test_secondary_key_decode_sets_rotation_telemetry_and_span_parity(monk
     monkeypatch.delenv("PAGINATION_CURSOR_SIGNING_SECRET", raising=False)
     monkeypatch.delenv("PAGINATION_CURSOR_HMAC_SECRET", raising=False)
 
+    session_id = _register_pagination_session(
+        pagination_mode="keyset",
+        query_scope_fp="abcdeffedcba0123",
+    )
     cursor = encode_keyset_cursor(
         [1],
         ["id|asc|nulls_last"],
@@ -757,6 +784,7 @@ async def test_secondary_key_decode_sets_rotation_telemetry_and_span_parity(monk
         query_fp="cursor-query-fp",
         scope_fp="abcdeffedcba0123",
         budget_snapshot=_BUDGET_SNAPSHOT,
+        pagination_session_id=session_id,
     )
     span = MagicMock()
     span.is_recording.return_value = True

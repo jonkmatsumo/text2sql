@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -16,6 +19,11 @@ from dal.offset_pagination import (
     encode_offset_pagination_token,
 )
 from dal.pagination_cursor import PAGINATION_CURSOR_SCOPE_MISMATCH, build_cursor_scope_fingerprint
+from dal.pagination_session import (
+    PAGINATION_SESSION_MISSING,
+    create_pagination_session,
+    get_default_pagination_session_registry,
+)
 from mcp_server.tools.execute_sql_query import handler
 
 pytestmark = pytest.mark.pagination
@@ -50,6 +58,153 @@ class _Conn:
 @asynccontextmanager
 async def _conn_ctx():
     yield _Conn()
+
+
+def _decode_offset_wrapper(token: str) -> dict[str, object]:
+    padded = token + "=" * (-len(token) % 4)
+    return json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+
+
+def _encode_offset_wrapper(wrapper: dict[str, object]) -> str:
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(wrapper, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).decode("ascii")
+    return encoded.rstrip("=")
+
+
+def _register_offset_pagination_session(*, tenant_id: int = 1, query_scope_fp: str) -> str:
+    session = create_pagination_session(
+        tenant_id=str(tenant_id),
+        provider_name="postgres",
+        pagination_mode="offset",
+        query_scope_fp=query_scope_fp,
+        policy_snapshot_fp="policy-fp-tests",
+        revocation_epoch=0,
+        now_epoch_milliseconds=1_700_000_000_000,
+    )
+    get_default_pagination_session_registry().put(session)
+    return session.session_id
+
+
+@pytest.mark.asyncio
+async def test_offset_first_page_mints_session_and_embeds_it_in_cursor(monkeypatch):
+    """First offset page should mint a server session and bind it into cursor payload."""
+    sql = "SELECT id FROM users ORDER BY id"
+    monkeypatch.setenv("PAGINATION_CURSOR_HMAC_SECRET", _TEST_SECRET)
+    get_default_pagination_session_registry().clear()
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=_offset_caps(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_a, **_kw: _conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+    ):
+        payload = await handler(sql, tenant_id=1, page_size=2)
+
+    result = json.loads(payload)
+    assert "error" not in result
+    session_id = result["metadata"].get("pagination_session_id")
+    assert isinstance(session_id, str) and session_id
+    token = result["metadata"].get("next_page_token")
+    assert isinstance(token, str) and token
+    wrapper = _decode_offset_wrapper(token)
+    assert wrapper["p"]["pagination_session_id"] == session_id
+    assert get_default_pagination_session_registry().get(session_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_offset_second_page_validates_same_session_id(monkeypatch):
+    """Continuation requests should retain and validate the same pagination session id."""
+    sql = "SELECT id FROM users ORDER BY id"
+    monkeypatch.setenv("PAGINATION_CURSOR_HMAC_SECRET", _TEST_SECRET)
+    get_default_pagination_session_registry().clear()
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=_offset_caps(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_a, **_kw: _conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+    ):
+        first_payload = await handler(sql, tenant_id=1, page_size=2)
+        first = json.loads(first_payload)
+        session_id = first["metadata"].get("pagination_session_id")
+        token = first["metadata"].get("next_page_token")
+        assert isinstance(session_id, str) and session_id
+        assert isinstance(token, str) and token
+
+        second_payload = await handler(sql, tenant_id=1, page_size=2, page_token=token)
+
+    second = json.loads(second_payload)
+    assert "error" not in second
+    assert second["metadata"].get("pagination_session_id") == session_id
+    next_token = second["metadata"].get("next_page_token")
+    assert isinstance(next_token, str) and next_token
+    wrapper = _decode_offset_wrapper(next_token)
+    assert wrapper["p"]["pagination_session_id"] == session_id
+
+
+@pytest.mark.asyncio
+async def test_offset_missing_session_id_in_cursor_rejected_fail_closed(monkeypatch):
+    """Continuation cursor missing session binding should be rejected fail closed."""
+    sql = "SELECT id FROM users ORDER BY id"
+    monkeypatch.setenv("PAGINATION_CURSOR_HMAC_SECRET", _TEST_SECRET)
+    get_default_pagination_session_registry().clear()
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=_offset_caps(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_a, **_kw: _conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+    ):
+        first_payload = await handler(sql, tenant_id=1, page_size=2)
+        first = json.loads(first_payload)
+        token = first["metadata"]["next_page_token"]
+        wrapper = _decode_offset_wrapper(token)
+        payload = dict(wrapper["p"])
+        payload.pop("pagination_session_id", None)
+        payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        wrapper["p"] = payload
+        wrapper["s"] = hmac.new(
+            _TEST_SECRET.encode("utf-8"), payload_bytes, digestmod=hashlib.sha256
+        ).hexdigest()
+        tampered = _encode_offset_wrapper(wrapper)
+
+        second_payload = await handler(sql, tenant_id=1, page_size=2, page_token=tampered)
+
+    second = json.loads(second_payload)
+    assert second["error"]["category"] == "invalid_request"
+    assert second["error"]["error_code"] == "VALIDATION_ERROR"
+    assert second["error"]["details_safe"]["reason_code"] == PAGINATION_SESSION_MISSING
+    assert (
+        second["metadata"].get("pagination.cursor.decode_reason_code") == PAGINATION_SESSION_MISSING
+    )
 
 
 @pytest.mark.asyncio
@@ -216,6 +371,9 @@ async def test_scope_binding_rejects_cross_mode_cursor_reuse():
         secret=_TEST_SECRET,
         scope_fp=scope_fp_for_keyset,
         budget_snapshot=_BUDGET_SNAPSHOT,
+        pagination_session_id=_register_offset_pagination_session(
+            tenant_id=1, query_scope_fp=scope_fp_for_keyset
+        ),
     )
     with (
         patch(
