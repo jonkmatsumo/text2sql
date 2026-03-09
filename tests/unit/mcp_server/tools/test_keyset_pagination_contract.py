@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dal.pagination_session import (
+    PAGINATION_SESSION_SCOPE_MISMATCH,
     create_pagination_session,
     get_default_pagination_session_registry,
 )
@@ -27,6 +28,18 @@ _BUDGET_SNAPSHOT = {
 pytestmark = pytest.mark.pagination
 
 
+def _default_policy_snapshot_fp() -> str:
+    payload = {
+        "tenant_enforcement_mode": "rls_session",
+        "tenant_rewrite_outcome": "APPLIED",
+        "tenant_rewrite_reason_code": None,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    return digest[:32]
+
+
 def _register_pagination_session(
     *,
     tenant_id: int = 1,
@@ -39,9 +52,8 @@ def _register_pagination_session(
         provider_name=provider_name,
         pagination_mode=pagination_mode,
         query_scope_fp=query_scope_fp,
-        policy_snapshot_fp="policy-fp-tests",
+        policy_snapshot_fp=_default_policy_snapshot_fp(),
         revocation_epoch=0,
-        now_epoch_milliseconds=1_700_000_000_000,
     )
     get_default_pagination_session_registry().put(session)
     return session.session_id
@@ -920,6 +932,80 @@ async def test_execute_sql_query_keyset_cursor_invalid_fingerprint():
             == "execution_pagination_keyset_cursor_invalid"
         )
         assert "fingerprint mismatch" in result["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_rejects_offset_session_binding(monkeypatch):
+    """Keyset continuation must reject session ids minted for offset mode."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    monkeypatch.setenv("PAGINATION_CURSOR_HMAC_SECRET", _TEST_SECRET)
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint",
+            return_value="current-fingerprint",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_query_fingerprint",
+            return_value="query-fp",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        from dal.keyset_pagination import encode_keyset_cursor
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, *_args, **_kwargs):
+                return [{"id": 1}]
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+        offset_session_id = _register_pagination_session(
+            pagination_mode="offset",
+            query_scope_fp=_TEST_SCOPE_FP,
+        )
+        cursor = encode_keyset_cursor(
+            [1],
+            ["id|asc|nulls_last"],
+            "current-fingerprint",
+            query_fp="query-fp",
+            scope_fp=_TEST_SCOPE_FP,
+            secret=_TEST_SECRET,
+            budget_snapshot=_BUDGET_SNAPSHOT,
+            pagination_session_id=offset_session_id,
+        )
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=cursor,
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["error_code"] == "VALIDATION_ERROR"
+    assert result["error"]["details_safe"]["reason_code"] == PAGINATION_SESSION_SCOPE_MISMATCH
+    metadata = result["metadata"]
+    assert metadata.get("pagination.cursor.scope_mismatch") is True
+    assert metadata.get("pagination.cursor.decode_reason_code") == PAGINATION_SESSION_SCOPE_MISMATCH
 
 
 @pytest.mark.asyncio

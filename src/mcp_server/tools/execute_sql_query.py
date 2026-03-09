@@ -82,6 +82,7 @@ from dal.pagination_cursor import (
 from dal.pagination_session import (
     PAGINATION_SESSION_MISSING,
     PAGINATION_SESSION_REVOKED,
+    PAGINATION_SESSION_SCOPE_MISMATCH,
     PAGINATION_SESSION_UNKNOWN,
     create_pagination_session,
     get_default_pagination_session_registry,
@@ -196,6 +197,7 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     PAGINATION_SESSION_MISSING,
     PAGINATION_SESSION_UNKNOWN,
     PAGINATION_SESSION_REVOKED,
+    PAGINATION_SESSION_SCOPE_MISMATCH,
     "KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING",
     PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED,
     PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED,
@@ -289,6 +291,7 @@ _CURSOR_DECODE_REASON_CODE_ALLOWLIST = {
     PAGINATION_SESSION_MISSING,
     PAGINATION_SESSION_UNKNOWN,
     PAGINATION_SESSION_REVOKED,
+    PAGINATION_SESSION_SCOPE_MISMATCH,
     "KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING",
     PAGINATION_BUDGET_SNAPSHOT_INVALID,
 }
@@ -300,6 +303,7 @@ _CURSOR_SECRET_MISCONFIG_REASON_ALLOWLIST = {
 _CURSOR_SCOPE_BINDING_REASON_ALLOWLIST = {
     PAGINATION_CURSOR_SCOPE_MISSING,
     PAGINATION_CURSOR_SCOPE_MISMATCH,
+    PAGINATION_SESSION_SCOPE_MISMATCH,
 }
 
 
@@ -336,6 +340,48 @@ def _normalize_tenant_enforcement_mode(mode: str | None) -> str:
     if normalized == "rls_session":
         return "rls_session"
     return "none"
+
+
+def _pagination_session_policy_snapshot_fingerprint(metadata: dict[str, Any]) -> str:
+    payload = {
+        "tenant_enforcement_mode": metadata.get("tenant_enforcement_mode"),
+        "tenant_rewrite_outcome": metadata.get("tenant_rewrite_outcome"),
+        "tenant_rewrite_reason_code": metadata.get("tenant_rewrite_reason_code"),
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    return digest[:32]
+
+
+def _normalize_pagination_session_scope_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        value = str(value)
+    normalized = value.strip()
+    return normalized or None
+
+
+def _build_pagination_session_scope_bindings(
+    *,
+    tenant_id: Any,
+    provider_name: Any,
+    pagination_mode: Any,
+    query_scope_fp: Any,
+    policy_snapshot_fp: Any,
+    revocation_epoch: Any,
+) -> dict[str, Any]:
+    return {
+        "tenant_id": _normalize_pagination_session_scope_value(tenant_id),
+        "provider_name": (_normalize_pagination_session_scope_value(provider_name) or "").lower(),
+        "pagination_mode": (
+            _normalize_pagination_session_scope_value(pagination_mode) or ""
+        ).lower(),
+        "query_scope_fp": _normalize_pagination_session_scope_value(query_scope_fp) or "",
+        "policy_snapshot_fp": _normalize_pagination_session_scope_value(policy_snapshot_fp) or "",
+        "revocation_epoch": int(revocation_epoch),
+    }
 
 
 def _tenant_enforcement_observability_fields(
@@ -986,6 +1032,7 @@ def _cursor_validation_outcome_from_reason_code(reason_code: Any) -> str | None:
         PAGINATION_SESSION_MISSING: "INVALID",
         PAGINATION_SESSION_UNKNOWN: "INVALID",
         PAGINATION_SESSION_REVOKED: "INVALID",
+        PAGINATION_SESSION_SCOPE_MISMATCH: "INVALID",
         "KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING": "INVALID",
     }
     return mapping.get(reason)
@@ -1091,6 +1138,9 @@ def _apply_cursor_decode_metadata(
     if fallback_reason_code == PAGINATION_CURSOR_SCOPE_MISMATCH:
         envelope_metadata["pagination.cursor.scope_bound"] = True
         envelope_metadata["pagination.cursor.scope_mismatch"] = True
+    if fallback_reason_code == PAGINATION_SESSION_SCOPE_MISMATCH:
+        envelope_metadata["pagination.cursor.scope_bound"] = True
+        envelope_metadata["pagination.cursor.scope_mismatch"] = True
     if fallback_reason_code in {
         PAGINATION_CURSOR_VERSION_UNSUPPORTED,
         PAGINATION_CURSOR_KIND_UNSUPPORTED,
@@ -1106,6 +1156,7 @@ def _validate_pagination_session_binding(
     *,
     session_id: Any,
     registry: Any,
+    expected_scope_bindings: dict[str, Any] | None = None,
 ) -> tuple[Any | None, str | None]:
     """Validate continuation cursor session binding against the server registry."""
     normalized_session_id = normalize_pagination_session_id(session_id)
@@ -1116,6 +1167,66 @@ def _validate_pagination_session_binding(
         return None, PAGINATION_SESSION_UNKNOWN
     if bool(getattr(session, "is_revoked", False)):
         return None, PAGINATION_SESSION_REVOKED
+    if isinstance(expected_scope_bindings, dict):
+        expected_tenant_id = _normalize_pagination_session_scope_value(
+            expected_scope_bindings.get("tenant_id")
+        )
+        expected_provider_name = (
+            _normalize_pagination_session_scope_value(expected_scope_bindings.get("provider_name"))
+            or ""
+        ).lower()
+        expected_pagination_mode = (
+            _normalize_pagination_session_scope_value(
+                expected_scope_bindings.get("pagination_mode")
+            )
+            or ""
+        ).lower()
+        expected_query_scope_fp = (
+            _normalize_pagination_session_scope_value(expected_scope_bindings.get("query_scope_fp"))
+            or ""
+        )
+        expected_policy_snapshot_fp = (
+            _normalize_pagination_session_scope_value(
+                expected_scope_bindings.get("policy_snapshot_fp")
+            )
+            or ""
+        )
+        try:
+            expected_revocation_epoch = int(expected_scope_bindings.get("revocation_epoch"))
+        except (TypeError, ValueError):
+            return None, PAGINATION_SESSION_SCOPE_MISMATCH
+
+        actual_tenant_id = _normalize_pagination_session_scope_value(
+            getattr(session, "tenant_id", None)
+        )
+        actual_provider_name = (
+            _normalize_pagination_session_scope_value(getattr(session, "provider_name", None)) or ""
+        ).lower()
+        actual_pagination_mode = (
+            _normalize_pagination_session_scope_value(getattr(session, "pagination_mode", None))
+            or ""
+        ).lower()
+        actual_query_scope_fp = (
+            _normalize_pagination_session_scope_value(getattr(session, "query_scope_fp", None))
+            or ""
+        )
+        actual_policy_snapshot_fp = (
+            _normalize_pagination_session_scope_value(getattr(session, "policy_snapshot_fp", None))
+            or ""
+        )
+        actual_revocation_epoch = getattr(session, "revocation_epoch", None)
+        if not isinstance(actual_revocation_epoch, int):
+            return None, PAGINATION_SESSION_SCOPE_MISMATCH
+
+        if (
+            actual_tenant_id != expected_tenant_id
+            or actual_provider_name != expected_provider_name
+            or actual_pagination_mode != expected_pagination_mode
+            or actual_query_scope_fp != expected_query_scope_fp
+            or actual_policy_snapshot_fp != expected_policy_snapshot_fp
+            or actual_revocation_epoch != expected_revocation_epoch
+        ):
+            return None, PAGINATION_SESSION_SCOPE_MISMATCH
     return session, None
 
 
@@ -3454,6 +3565,7 @@ async def handler(
         cursor_scope_fingerprint = None
         pagination_session = None
         pagination_session_id: str | None = None
+        pagination_session_scope_bindings: dict[str, Any] | None = None
         pagination_session_registry = get_default_pagination_session_registry()
         pagination_session_continuation_requested = bool(page_token or keyset_cursor)
         pagination_session_binding_enabled = bool(
@@ -3511,33 +3623,24 @@ async def handler(
                 order_signature=keyset_signature_for_fingerprint,
                 backend_signature=backend_signature,
             )
+            pagination_session_scope_bindings = _build_pagination_session_scope_bindings(
+                tenant_id=tenant_id,
+                provider_name=provider,
+                pagination_mode=pagination_mode,
+                query_scope_fp=cursor_scope_fingerprint or cursor_query_fingerprint or "scope",
+                policy_snapshot_fp=_pagination_session_policy_snapshot_fingerprint(
+                    tenant_enforcement_metadata
+                ),
+                revocation_epoch=0,
+            )
             if pagination_session_binding_enabled and not pagination_session_continuation_requested:
-                policy_snapshot_payload = {
-                    "tenant_enforcement_mode": tenant_enforcement_metadata.get(
-                        "tenant_enforcement_mode"
-                    ),
-                    "tenant_rewrite_outcome": tenant_enforcement_metadata.get(
-                        "tenant_rewrite_outcome"
-                    ),
-                    "tenant_rewrite_reason_code": tenant_enforcement_metadata.get(
-                        "tenant_rewrite_reason_code"
-                    ),
-                }
-                policy_snapshot_fp = hashlib.sha256(
-                    json.dumps(
-                        policy_snapshot_payload,
-                        separators=(",", ":"),
-                        sort_keys=True,
-                        default=str,
-                    ).encode("utf-8")
-                ).hexdigest()[:32]
                 pagination_session = create_pagination_session(
-                    tenant_id=(str(tenant_id) if tenant_id is not None else None),
-                    provider_name=provider,
-                    pagination_mode=pagination_mode,
-                    query_scope_fp=cursor_scope_fingerprint or cursor_query_fingerprint or "scope",
-                    policy_snapshot_fp=policy_snapshot_fp,
-                    revocation_epoch=0,
+                    tenant_id=pagination_session_scope_bindings["tenant_id"],
+                    provider_name=pagination_session_scope_bindings["provider_name"],
+                    pagination_mode=pagination_session_scope_bindings["pagination_mode"],
+                    query_scope_fp=pagination_session_scope_bindings["query_scope_fp"],
+                    policy_snapshot_fp=pagination_session_scope_bindings["policy_snapshot_fp"],
+                    revocation_epoch=pagination_session_scope_bindings["revocation_epoch"],
                 )
                 pagination_session_registry.put(pagination_session)
                 pagination_session_id = pagination_session.session_id
@@ -3850,6 +3953,7 @@ async def handler(
                     ) = _validate_pagination_session_binding(
                         session_id=keyset_decode_metadata.get("pagination_session_id"),
                         registry=pagination_session_registry,
+                        expected_scope_bindings=pagination_session_scope_bindings,
                     )
                     if pagination_session_reason_code is not None:
                         _apply_cursor_decode_metadata(
@@ -4030,6 +4134,7 @@ async def handler(
                         ) = _validate_pagination_session_binding(
                             session_id=token_payload.pagination_session_id,
                             registry=pagination_session_registry,
+                            expected_scope_bindings=pagination_session_scope_bindings,
                         )
                         if pagination_session_reason_code is not None:
                             raise OffsetPaginationTokenError(

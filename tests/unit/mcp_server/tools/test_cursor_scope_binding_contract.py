@@ -21,6 +21,7 @@ from dal.offset_pagination import (
 from dal.pagination_cursor import PAGINATION_CURSOR_SCOPE_MISMATCH, build_cursor_scope_fingerprint
 from dal.pagination_session import (
     PAGINATION_SESSION_MISSING,
+    PAGINATION_SESSION_SCOPE_MISMATCH,
     create_pagination_session,
     get_default_pagination_session_registry,
 )
@@ -37,6 +38,18 @@ _BUDGET_SNAPSHOT = {
     "consumed_bytes": 0,
     "consumed_duration_ms": 0,
 }
+
+
+def _default_policy_snapshot_fp() -> str:
+    payload = {
+        "tenant_enforcement_mode": "rls_session",
+        "tenant_rewrite_outcome": "APPLIED",
+        "tenant_rewrite_reason_code": None,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    return digest[:32]
 
 
 def _offset_caps() -> SimpleNamespace:
@@ -78,12 +91,38 @@ def _register_offset_pagination_session(*, tenant_id: int = 1, query_scope_fp: s
         provider_name="postgres",
         pagination_mode="offset",
         query_scope_fp=query_scope_fp,
-        policy_snapshot_fp="policy-fp-tests",
+        policy_snapshot_fp=_default_policy_snapshot_fp(),
         revocation_epoch=0,
-        now_epoch_milliseconds=1_700_000_000_000,
     )
     get_default_pagination_session_registry().put(session)
     return session.session_id
+
+
+def _build_offset_cursor_bindings(*, sql: str, tenant_id: int) -> tuple[str, str]:
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql=sql,
+        params=[],
+        tenant_id=tenant_id,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    query_fp = build_cursor_query_fingerprint(
+        sql=sql,
+        provider="postgres",
+        pagination_mode="offset",
+    )
+    scope_fp = build_cursor_scope_fingerprint(
+        tenant_id=tenant_id,
+        provider_name="postgres",
+        provider_mode="single_backend",
+        tenant_enforcement_mode=None,
+        pagination_mode="offset",
+        query_fingerprint=query_fp,
+    )
+    return fingerprint, scope_fp
 
 
 @pytest.mark.asyncio
@@ -205,6 +244,102 @@ async def test_offset_missing_session_id_in_cursor_rejected_fail_closed(monkeypa
     assert (
         second["metadata"].get("pagination.cursor.decode_reason_code") == PAGINATION_SESSION_MISSING
     )
+
+
+@pytest.mark.asyncio
+async def test_offset_session_scope_mismatch_rejects_cross_tenant_when_cursor_scope_matches(
+    monkeypatch,
+):
+    """Session tenant binding must reject cross-tenant reuse even with matching cursor scope."""
+    sql = "SELECT id FROM users ORDER BY id"
+    monkeypatch.setenv("PAGINATION_CURSOR_HMAC_SECRET", _TEST_SECRET)
+    get_default_pagination_session_registry().clear()
+    fingerprint, scope_fp = _build_offset_cursor_bindings(sql=sql, tenant_id=2)
+    session_id = _register_offset_pagination_session(tenant_id=1, query_scope_fp=scope_fp)
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=2,
+        fingerprint=fingerprint,
+        secret=_TEST_SECRET,
+        scope_fp=scope_fp,
+        budget_snapshot=_BUDGET_SNAPSHOT,
+        pagination_session_id=session_id,
+    )
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=_offset_caps(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_a, **_kw: _conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+    ):
+        payload = await handler(sql, tenant_id=2, page_size=2, page_token=token)
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["error_code"] == "VALIDATION_ERROR"
+    assert result["error"]["details_safe"]["reason_code"] == PAGINATION_SESSION_SCOPE_MISMATCH
+    metadata = result["metadata"]
+    assert metadata.get("pagination.cursor.scope_bound") is True
+    assert metadata.get("pagination.cursor.scope_mismatch") is True
+    assert metadata.get("pagination.cursor.decode_reason_code") == PAGINATION_SESSION_SCOPE_MISMATCH
+
+
+@pytest.mark.asyncio
+async def test_offset_session_scope_mismatch_rejects_cross_query_session_reuse(monkeypatch):
+    """Session query-scope binding must reject reuse against a different SQL fingerprint."""
+    sql_one = "SELECT id FROM users ORDER BY id"
+    sql_two = "SELECT id FROM users WHERE active = true ORDER BY id"
+    monkeypatch.setenv("PAGINATION_CURSOR_HMAC_SECRET", _TEST_SECRET)
+    get_default_pagination_session_registry().clear()
+    _, scope_fp_one = _build_offset_cursor_bindings(sql=sql_one, tenant_id=1)
+    fingerprint_two, scope_fp_two = _build_offset_cursor_bindings(sql=sql_two, tenant_id=1)
+    session_id = _register_offset_pagination_session(tenant_id=1, query_scope_fp=scope_fp_one)
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=2,
+        fingerprint=fingerprint_two,
+        secret=_TEST_SECRET,
+        scope_fp=scope_fp_two,
+        budget_snapshot=_BUDGET_SNAPSHOT,
+        pagination_session_id=session_id,
+    )
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=_offset_caps(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_a, **_kw: _conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+    ):
+        payload = await handler(sql_two, tenant_id=1, page_size=2, page_token=token)
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["error_code"] == "VALIDATION_ERROR"
+    assert result["error"]["details_safe"]["reason_code"] == PAGINATION_SESSION_SCOPE_MISMATCH
+    metadata = result["metadata"]
+    assert metadata.get("pagination.cursor.scope_bound") is True
+    assert metadata.get("pagination.cursor.scope_mismatch") is True
+    assert metadata.get("pagination.cursor.decode_reason_code") == PAGINATION_SESSION_SCOPE_MISMATCH
 
 
 @pytest.mark.asyncio

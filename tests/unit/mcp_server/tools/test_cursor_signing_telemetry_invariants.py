@@ -9,6 +9,7 @@ These tests verify:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -73,6 +74,18 @@ async def _conn_ctx(conn):
     yield conn
 
 
+def _default_policy_snapshot_fp() -> str:
+    payload = {
+        "tenant_enforcement_mode": "rls_session",
+        "tenant_rewrite_outcome": "APPLIED",
+        "tenant_rewrite_reason_code": None,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    return digest[:32]
+
+
 def _register_pagination_session(
     *,
     tenant_id: int = 1,
@@ -84,9 +97,8 @@ def _register_pagination_session(
         provider_name="postgres",
         pagination_mode=pagination_mode,
         query_scope_fp=query_scope_fp,
-        policy_snapshot_fp="policy-fp-tests",
+        policy_snapshot_fp=_default_policy_snapshot_fp(),
         revocation_epoch=0,
-        now_epoch_milliseconds=1_700_000_000_000,
     )
     get_default_pagination_session_registry().put(session)
     return session.session_id
