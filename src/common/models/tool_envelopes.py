@@ -147,6 +147,36 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.session.pages_served_count",
         serialization_alias="pagination.session.pages_served_count",
     )
+    pagination_session_present: Optional[bool] = Field(
+        None,
+        description="Whether pagination session state is present for this request",
+        validation_alias="pagination.session.present",
+        serialization_alias="pagination.session.present",
+    )
+    pagination_session_created: Optional[bool] = Field(
+        None,
+        description="Whether this response minted a new pagination session",
+        validation_alias="pagination.session.created",
+        serialization_alias="pagination.session.created",
+    )
+    pagination_session_revoked: Optional[bool] = Field(
+        None,
+        description="Whether the pagination session was observed as revoked",
+        validation_alias="pagination.session.revoked",
+        serialization_alias="pagination.session.revoked",
+    )
+    pagination_session_scope_match: Optional[bool] = Field(
+        None,
+        description="Whether pagination session scope bindings matched the current request",
+        validation_alias="pagination.session.scope_match",
+        serialization_alias="pagination.session.scope_match",
+    )
+    pagination_session_pages_served_bucket: Optional[str] = Field(
+        None,
+        description="Bounded bucket for pages served within the pagination session",
+        validation_alias="pagination.session.pages_served_bucket",
+        serialization_alias="pagination.session.pages_served_bucket",
+    )
     next_keyset_cursor: Optional[str] = Field(
         None, description="Opaque cursor for the next page when using keyset pagination"
     )

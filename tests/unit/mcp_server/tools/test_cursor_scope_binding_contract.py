@@ -8,7 +8,7 @@ import hmac
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -243,6 +243,8 @@ async def test_offset_revoked_session_rejects_continuation(monkeypatch):
     assert (
         second["metadata"].get("pagination.cursor.decode_reason_code") == PAGINATION_SESSION_REVOKED
     )
+    assert second["metadata"].get("pagination.session.revoked") is True
+    assert second["metadata"].get("pagination.session.scope_match") is False
 
 
 @pytest.mark.asyncio
@@ -306,6 +308,83 @@ async def test_offset_session_audit_updates_only_on_successful_continuation(monk
     assert session_after_failure is not None
     assert session_after_failure.pages_served_count == 1
     assert session_after_failure.last_accessed_at_ms == last_access_after_success
+
+
+@pytest.mark.asyncio
+async def test_offset_session_telemetry_span_parity_and_no_session_id_leakage(monkeypatch):
+    """Session telemetry must be bounded and span/metadata parity must hold."""
+    sql = "SELECT id FROM users ORDER BY id"
+    monkeypatch.setenv("PAGINATION_CURSOR_HMAC_SECRET", _TEST_SECRET)
+    registry = get_default_pagination_session_registry()
+    registry.clear()
+    span = MagicMock()
+    span.is_recording.return_value = True
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=_offset_caps(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_a, **_kw: _conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=span),
+        patch("mcp_server.tools.execute_sql_query.mcp_metrics.add_counter") as add_counter,
+    ):
+        first_payload = await handler(sql, tenant_id=1, page_size=2)
+        first = json.loads(first_payload)
+        session_id = first["metadata"].get("pagination_session_id")
+        token = first["metadata"].get("next_page_token")
+        assert isinstance(session_id, str) and session_id
+        assert isinstance(token, str) and token
+
+        second_payload = await handler(sql, tenant_id=1, page_size=2, page_token=token)
+
+    second = json.loads(second_payload)
+    assert "error" not in second
+    metadata = second["metadata"]
+    assert metadata.get("pagination.session.present") is True
+    assert metadata.get("pagination.session.created") is False
+    assert metadata.get("pagination.session.revoked") is False
+    assert metadata.get("pagination.session.scope_match") is True
+    assert metadata.get("pagination.session.pages_served_bucket") == "1"
+
+    span_attrs = {
+        call.args[0]: call.args[1]
+        for call in span.set_attribute.call_args_list
+        if len(call.args) >= 2
+    }
+    assert span_attrs.get("pagination.session.present") == metadata.get(
+        "pagination.session.present"
+    )
+    assert span_attrs.get("pagination.session.created") == metadata.get(
+        "pagination.session.created"
+    )
+    assert span_attrs.get("pagination.session.revoked") == metadata.get(
+        "pagination.session.revoked"
+    )
+    assert span_attrs.get("pagination.session.scope_match") == metadata.get(
+        "pagination.session.scope_match"
+    )
+    assert span_attrs.get("pagination.session.pages_served_bucket") == metadata.get(
+        "pagination.session.pages_served_bucket"
+    )
+
+    for call in add_counter.call_args_list:
+        attrs = call.kwargs.get("attributes", {})
+        serialized_attrs = json.dumps(attrs, sort_keys=True, default=str)
+        assert session_id not in serialized_attrs
+
+    for key, value in span_attrs.items():
+        if isinstance(value, str):
+            assert session_id not in value, f"span attribute {key} leaked session id"
 
 
 @pytest.mark.asyncio
