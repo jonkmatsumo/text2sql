@@ -132,6 +132,51 @@ class ExecuteSQLQueryMetadata(BaseModel):
     pagination_mode_requested: Optional[Literal["offset", "keyset"]] = Field(
         None, description="The pagination strategy requested by the caller"
     )
+    pagination_session_id: Optional[str] = Field(
+        None, description="Server-issued pagination session id bound to this pagination chain"
+    )
+    pagination_session_last_accessed_at_ms: Optional[int] = Field(
+        None,
+        description="Epoch milliseconds of the last successful continuation for this session",
+        validation_alias="pagination.session.last_accessed_at_ms",
+        serialization_alias="pagination.session.last_accessed_at_ms",
+    )
+    pagination_session_pages_served_count: Optional[int] = Field(
+        None,
+        description="Number of successful continuation pages served for this session",
+        validation_alias="pagination.session.pages_served_count",
+        serialization_alias="pagination.session.pages_served_count",
+    )
+    pagination_session_present: Optional[bool] = Field(
+        None,
+        description="Whether pagination session state is present for this request",
+        validation_alias="pagination.session.present",
+        serialization_alias="pagination.session.present",
+    )
+    pagination_session_created: Optional[bool] = Field(
+        None,
+        description="Whether this response minted a new pagination session",
+        validation_alias="pagination.session.created",
+        serialization_alias="pagination.session.created",
+    )
+    pagination_session_revoked: Optional[bool] = Field(
+        None,
+        description="Whether the pagination session was observed as revoked",
+        validation_alias="pagination.session.revoked",
+        serialization_alias="pagination.session.revoked",
+    )
+    pagination_session_scope_match: Optional[bool] = Field(
+        None,
+        description="Whether pagination session scope bindings matched the current request",
+        validation_alias="pagination.session.scope_match",
+        serialization_alias="pagination.session.scope_match",
+    )
+    pagination_session_pages_served_bucket: Optional[str] = Field(
+        None,
+        description="Bounded bucket for pages served within the pagination session",
+        validation_alias="pagination.session.pages_served_bucket",
+        serialization_alias="pagination.session.pages_served_bucket",
+    )
     next_keyset_cursor: Optional[str] = Field(
         None, description="Opaque cursor for the next page when using keyset pagination"
     )
