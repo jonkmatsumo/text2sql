@@ -1478,6 +1478,8 @@ async def test_execute_sql_query_offset_continuation_adapts_page_size_to_remaini
     monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
     monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100000")
     monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
 
     class _Conn:
         async def fetch(self, sql_text, *params):
@@ -1508,6 +1510,7 @@ async def test_execute_sql_query_offset_continuation_adapts_page_size_to_remaini
             side_effect=lambda *_args, **_kwargs: _conn_ctx(),
         ),
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
         first_payload = await handler(sql, tenant_id=1, page_size=80)
@@ -1516,11 +1519,55 @@ async def test_execute_sql_query_offset_continuation_adapts_page_size_to_remaini
         token = first["metadata"]["next_page_token"]
         assert token
 
+        mock_span.reset_mock()
         second_payload = await handler(sql, tenant_id=1, page_size=80, page_token=token)
         second = json.loads(second_payload)
         assert "error" not in second
         assert len(second["rows"]) == 20
         assert second["metadata"]["page_size"] == 20
+        metadata = second["metadata"]
+        assert metadata["pagination.session.page_size_requested"] == 80
+        assert metadata["pagination.session.page_size_effective"] == 20
+        assert metadata["pagination.session.page_size_adjusted"] is True
+        assert metadata["pagination.session.page_size_adjusted_reason_code"] == (
+            "PAGINATION_SESSION_PAGE_SIZE_ADJUSTED"
+        )
+        assert metadata["pagination.session.remaining_rows_bucket"] == "11_100"
+        assert metadata["pagination.session.remaining_bytes_bucket"] in {
+            "0",
+            "1_1k",
+            "1k_16k",
+            "16k_256k",
+            "256k_plus",
+        }
+        assert metadata["pagination.session.no_safe_page"] is False
+        attrs = {}
+        for call in mock_span.set_attribute.call_args_list:
+            key, value = call.args
+            attrs[key] = value
+        assert (
+            attrs["pagination.session.page_size_requested"]
+            == metadata["pagination.session.page_size_requested"]
+        )
+        assert (
+            attrs["pagination.session.page_size_effective"]
+            == metadata["pagination.session.page_size_effective"]
+        )
+        assert (
+            attrs["pagination.session.page_size_adjusted"]
+            == metadata["pagination.session.page_size_adjusted"]
+        )
+        assert (
+            attrs["pagination.session.remaining_rows_bucket"]
+            == metadata["pagination.session.remaining_rows_bucket"]
+        )
+        assert (
+            attrs["pagination.session.remaining_bytes_bucket"]
+            == metadata["pagination.session.remaining_bytes_bucket"]
+        )
+        assert (
+            attrs["pagination.session.no_safe_page"] == metadata["pagination.session.no_safe_page"]
+        )
         next_token = second["metadata"]["next_page_token"]
         assert next_token
 
@@ -1654,6 +1701,8 @@ async def test_execute_sql_query_offset_rejected_continuation_does_not_mutate_se
     monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
     monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100000")
     monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
 
     base_session = create_pagination_session(
         tenant_id="1",
@@ -1726,12 +1775,51 @@ async def test_execute_sql_query_offset_rejected_continuation_does_not_mutate_se
             return_value=_TEST_SCOPE_FP,
         ),
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
         payload = await handler(sql, tenant_id=1, page_size=4, page_token=token)
 
     result = json.loads(payload)
     assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_SESSION_NO_SAFE_PAGE_SIZE"
+    metadata = result["metadata"]
+    assert metadata["pagination.session.page_size_requested"] == 4
+    assert metadata["pagination.session.page_size_effective"] == 0
+    assert metadata["pagination.session.page_size_adjusted"] is True
+    assert metadata["pagination.session.page_size_adjusted_reason_code"] == (
+        "PAGINATION_SESSION_PAGE_SIZE_ADJUSTED"
+    )
+    assert metadata["pagination.session.remaining_rows_bucket"] == "501_plus"
+    assert metadata["pagination.session.remaining_bytes_bucket"] == "1_1k"
+    assert metadata["pagination.session.no_safe_page"] is True
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+    assert (
+        attrs["pagination.session.page_size_requested"]
+        == metadata["pagination.session.page_size_requested"]
+    )
+    assert (
+        attrs["pagination.session.page_size_effective"]
+        == metadata["pagination.session.page_size_effective"]
+    )
+    assert (
+        attrs["pagination.session.page_size_adjusted"]
+        == metadata["pagination.session.page_size_adjusted"]
+    )
+    assert (
+        attrs["pagination.session.remaining_rows_bucket"]
+        == metadata["pagination.session.remaining_rows_bucket"]
+    )
+    assert (
+        attrs["pagination.session.remaining_bytes_bucket"]
+        == metadata["pagination.session.remaining_bytes_bucket"]
+    )
+    assert attrs["pagination.session.no_safe_page"] == metadata["pagination.session.no_safe_page"]
+    serialized = json.dumps(result)
+    assert sql not in serialized
+    assert token not in serialized
     loaded = registry.get(seeded_session.session_id)
     assert loaded is not None
     assert loaded.avg_row_bytes_estimate == 120

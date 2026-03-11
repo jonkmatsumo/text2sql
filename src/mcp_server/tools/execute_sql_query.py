@@ -318,6 +318,14 @@ _PAGINATION_SESSION_REASON_ALLOWLIST = {
     PAGINATION_SESSION_SCOPE_MISMATCH,
 }
 _PAGINATION_SESSION_PAGES_SERVED_BUCKET_ALLOWLIST = {"0", "1", "2_4", "5_9", "10_plus"}
+_PAGINATION_SESSION_REMAINING_ROWS_BUCKET_ALLOWLIST = {"0", "1_10", "11_100", "101_500", "501_plus"}
+_PAGINATION_SESSION_REMAINING_BYTES_BUCKET_ALLOWLIST = {
+    "0",
+    "1_1k",
+    "1k_16k",
+    "16k_256k",
+    "256k_plus",
+}
 
 
 @dataclass(frozen=True)
@@ -454,6 +462,115 @@ def _apply_pagination_session_failure_metadata(
         session_revoked=False,
         session_scope_match=False,
     )
+
+
+def _apply_pagination_session_page_size_metadata(
+    envelope_metadata: dict[str, Any],
+    *,
+    requested_page_size: int,
+    effective_page_size: int,
+    remaining_rows: int,
+    remaining_bytes: int,
+    no_safe_page: bool,
+) -> None:
+    """Attach bounded adaptive page-size decision metadata for session continuations."""
+    bounded_requested = max(0, int(requested_page_size))
+    bounded_effective = max(0, int(effective_page_size))
+    adjusted = bounded_effective != bounded_requested
+    envelope_metadata["pagination.session.page_size_requested"] = bounded_requested
+    envelope_metadata["pagination.session.page_size_effective"] = bounded_effective
+    envelope_metadata["pagination.session.page_size_adjusted"] = bool(adjusted)
+    envelope_metadata["pagination.session.page_size_adjusted_reason_code"] = (
+        PAGINATION_SESSION_PAGE_SIZE_ADJUSTED if adjusted else None
+    )
+    envelope_metadata["pagination.session.remaining_rows_bucket"] = rows_remaining_bucket(
+        remaining_rows
+    )
+    envelope_metadata["pagination.session.remaining_bytes_bucket"] = bytes_remaining_bucket(
+        remaining_bytes
+    )
+    envelope_metadata["pagination.session.no_safe_page"] = bool(no_safe_page)
+
+
+def _normalize_pagination_session_remaining_rows_bucket(raw_value: Any) -> str | None:
+    if not isinstance(raw_value, str):
+        return None
+    normalized = raw_value.strip()
+    if normalized in _PAGINATION_SESSION_REMAINING_ROWS_BUCKET_ALLOWLIST:
+        return normalized
+    return None
+
+
+def _normalize_pagination_session_remaining_bytes_bucket(raw_value: Any) -> str | None:
+    if not isinstance(raw_value, str):
+        return None
+    normalized = raw_value.strip()
+    if normalized in _PAGINATION_SESSION_REMAINING_BYTES_BUCKET_ALLOWLIST:
+        return normalized
+    return None
+
+
+def _record_pagination_session_page_size_observability(metadata: dict[str, Any] | None) -> None:
+    session_metadata = metadata if isinstance(metadata, dict) else {}
+    requested_raw = session_metadata.get("pagination.session.page_size_requested")
+    effective_raw = session_metadata.get("pagination.session.page_size_effective")
+    requested = (
+        int(requested_raw)
+        if isinstance(requested_raw, int)
+        and not isinstance(requested_raw, bool)
+        and requested_raw >= 0
+        else None
+    )
+    effective = (
+        int(effective_raw)
+        if isinstance(effective_raw, int)
+        and not isinstance(effective_raw, bool)
+        and effective_raw >= 0
+        else None
+    )
+    adjusted_raw = session_metadata.get("pagination.session.page_size_adjusted")
+    adjusted = bool(adjusted_raw) if adjusted_raw is not None else None
+    no_safe_raw = session_metadata.get("pagination.session.no_safe_page")
+    no_safe = bool(no_safe_raw) if no_safe_raw is not None else None
+    remaining_rows_bucket = _normalize_pagination_session_remaining_rows_bucket(
+        session_metadata.get("pagination.session.remaining_rows_bucket")
+    )
+    remaining_bytes_bucket = _normalize_pagination_session_remaining_bytes_bucket(
+        session_metadata.get("pagination.session.remaining_bytes_bucket")
+    )
+
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        if requested is not None:
+            span.set_attribute("pagination.session.page_size_requested", requested)
+        if effective is not None:
+            span.set_attribute("pagination.session.page_size_effective", effective)
+        if adjusted is not None:
+            span.set_attribute("pagination.session.page_size_adjusted", adjusted)
+        if remaining_rows_bucket is not None:
+            span.set_attribute("pagination.session.remaining_rows_bucket", remaining_rows_bucket)
+        if remaining_bytes_bucket is not None:
+            span.set_attribute("pagination.session.remaining_bytes_bucket", remaining_bytes_bucket)
+        if no_safe is not None:
+            span.set_attribute("pagination.session.no_safe_page", no_safe)
+
+    if adjusted:
+        mcp_metrics.add_counter(
+            "pagination.session.page_size_adjustments_total",
+            description=(
+                "Count of pagination-session continuation requests with adaptive "
+                "page-size reduction"
+            ),
+            attributes={"tool_name": TOOL_NAME},
+        )
+    if no_safe:
+        mcp_metrics.add_counter(
+            "pagination.session.no_safe_page_total",
+            description=(
+                "Count of pagination-session continuation rejections with no safe page size"
+            ),
+            attributes={"tool_name": TOOL_NAME},
+        )
 
 
 def _tenant_enforcement_observability_fields(
@@ -2509,6 +2626,7 @@ def _construct_error_response(
     _record_cursor_secret_observability(envelope_meta)
     _record_keyset_schema_observability(envelope_meta)
     _record_execution_budget_observability(envelope_meta)
+    _record_pagination_session_page_size_observability(envelope_meta)
 
     envelope = ExecuteSQLQueryResponseEnvelope(
         rows=[],
@@ -2877,6 +2995,13 @@ async def handler(
         "pagination.session.pages_served_bucket": "0",
         "pagination.session.last_accessed_at_ms": None,
         "pagination.session.pages_served_count": None,
+        "pagination.session.page_size_requested": None,
+        "pagination.session.page_size_effective": None,
+        "pagination.session.page_size_adjusted": None,
+        "pagination.session.page_size_adjusted_reason_code": None,
+        "pagination.session.remaining_rows_bucket": None,
+        "pagination.session.remaining_bytes_bucket": None,
+        "pagination.session.no_safe_page": None,
         "execution_timeout_applied": execution_timeout_applied,
         "execution_timeout_triggered": False,
         "resource_capability_mismatch": None,
@@ -2942,8 +3067,16 @@ async def handler(
             envelope_metadata=tenant_enforcement_metadata,
         )
 
-    def _no_safe_page_size_response() -> str:
+    def _no_safe_page_size_response(*, requested_page_size: int) -> str:
         reason_code = PAGINATION_SESSION_NO_SAFE_PAGE_SIZE
+        _apply_pagination_session_page_size_metadata(
+            tenant_enforcement_metadata,
+            requested_page_size=requested_page_size,
+            effective_page_size=0,
+            remaining_rows=execution_budget.rows_remaining,
+            remaining_bytes=execution_budget.bytes_remaining,
+            no_safe_page=True,
+        )
         _apply_execution_budget_metadata(
             tenant_enforcement_metadata,
             execution_budget,
@@ -4268,11 +4401,17 @@ async def handler(
                             estimated_avg_row_bytes=estimated_avg_row_bytes,
                         )
                         if adaptive_keyset_page_size <= 0:
-                            return _no_safe_page_size_response()
-                        if adaptive_keyset_page_size != requested_keyset_page_size:
-                            tenant_enforcement_metadata[
-                                "pagination.session.page_size_adjusted_reason_code"
-                            ] = PAGINATION_SESSION_PAGE_SIZE_ADJUSTED
+                            return _no_safe_page_size_response(
+                                requested_page_size=requested_keyset_page_size
+                            )
+                        _apply_pagination_session_page_size_metadata(
+                            tenant_enforcement_metadata,
+                            requested_page_size=requested_keyset_page_size,
+                            effective_page_size=adaptive_keyset_page_size,
+                            remaining_rows=execution_budget.rows_remaining,
+                            remaining_bytes=execution_budget.bytes_remaining,
+                            no_safe_page=False,
+                        )
                         effective_page_size = adaptive_keyset_page_size
                         applied_page_size = adaptive_keyset_page_size
                         tenant_enforcement_metadata["pagination.keyset.adaptive_page_size"] = (
@@ -4502,6 +4641,14 @@ async def handler(
                             estimated_avg_row_bytes=estimated_avg_row_bytes,
                         )
                         if adaptive_offset_page_size <= 0:
+                            _apply_pagination_session_page_size_metadata(
+                                tenant_enforcement_metadata,
+                                requested_page_size=requested_offset_page_size,
+                                effective_page_size=0,
+                                remaining_rows=execution_budget.rows_remaining,
+                                remaining_bytes=execution_budget.bytes_remaining,
+                                no_safe_page=True,
+                            )
                             raise OffsetPaginationTokenError(
                                 reason_code=PAGINATION_SESSION_NO_SAFE_PAGE_SIZE,
                                 message=(
@@ -4509,10 +4656,14 @@ async def handler(
                                     "remaining session budget."
                                 ),
                             )
-                        if adaptive_offset_page_size != requested_offset_page_size:
-                            tenant_enforcement_metadata[
-                                "pagination.session.page_size_adjusted_reason_code"
-                            ] = PAGINATION_SESSION_PAGE_SIZE_ADJUSTED
+                        _apply_pagination_session_page_size_metadata(
+                            tenant_enforcement_metadata,
+                            requested_page_size=requested_offset_page_size,
+                            effective_page_size=adaptive_offset_page_size,
+                            remaining_rows=execution_budget.rows_remaining,
+                            remaining_bytes=execution_budget.bytes_remaining,
+                            no_safe_page=False,
+                        )
                         pagination_limit = adaptive_offset_page_size
                         effective_page_size = adaptive_offset_page_size
                         applied_page_size = adaptive_offset_page_size
@@ -5067,6 +5218,29 @@ async def handler(
                 "pagination.session.pages_served_bucket": tenant_enforcement_metadata.get(
                     "pagination.session.pages_served_bucket"
                 ),
+                "pagination.session.page_size_requested": tenant_enforcement_metadata.get(
+                    "pagination.session.page_size_requested"
+                ),
+                "pagination.session.page_size_effective": tenant_enforcement_metadata.get(
+                    "pagination.session.page_size_effective"
+                ),
+                "pagination.session.page_size_adjusted": tenant_enforcement_metadata.get(
+                    "pagination.session.page_size_adjusted"
+                ),
+                "pagination.session.page_size_adjusted_reason_code": (
+                    tenant_enforcement_metadata.get(
+                        "pagination.session.page_size_adjusted_reason_code"
+                    )
+                ),
+                "pagination.session.remaining_rows_bucket": tenant_enforcement_metadata.get(
+                    "pagination.session.remaining_rows_bucket"
+                ),
+                "pagination.session.remaining_bytes_bucket": tenant_enforcement_metadata.get(
+                    "pagination.session.remaining_bytes_bucket"
+                ),
+                "pagination.session.no_safe_page": tenant_enforcement_metadata.get(
+                    "pagination.session.no_safe_page"
+                ),
                 "pagination.keyset.replica_lag_seconds": tenant_enforcement_metadata.get(
                     "pagination.keyset.replica_lag_seconds"
                 ),
@@ -5193,6 +5367,7 @@ async def handler(
         _record_cursor_secret_observability(tenant_enforcement_metadata)
         _record_keyset_schema_observability(tenant_enforcement_metadata)
         _record_execution_budget_observability(tenant_enforcement_metadata)
+        _record_pagination_session_page_size_observability(tenant_enforcement_metadata)
         _record_result_contract_observability(
             partial=is_truncated,
             partial_reason=partial_reason,
