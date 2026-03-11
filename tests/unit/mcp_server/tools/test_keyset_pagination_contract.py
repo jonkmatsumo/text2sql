@@ -4538,8 +4538,10 @@ async def test_execute_sql_query_keyset_budget_metadata_non_negative(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_execute_sql_query_keyset_rejects_when_global_row_budget_exceeded(monkeypatch):
-    """Second page should fail closed when cumulative rows exceed request budget."""
+async def test_execute_sql_query_keyset_continuation_adapts_page_size_to_remaining_row_budget(
+    monkeypatch,
+):
+    """Continuation should shrink keyset page size to remaining row budget before execution."""
     caps = SimpleNamespace(
         provider_name="postgres",
         tenant_enforcement_mode="rls_session",
@@ -4598,12 +4600,30 @@ async def test_execute_sql_query_keyset_rejects_when_global_row_budget_exceeded(
                 page_size=30,
             )
         )
+        assert "error" not in page_two
+        assert len(page_two["rows"]) == 20
+        assert page_two["metadata"]["page_size"] == 20
+        assert page_two["metadata"]["pagination.keyset.effective_page_size"] == 20
+        assert page_two["metadata"]["pagination.keyset.page_size_effective"] == 20
+        cursor_two = page_two["metadata"]["next_keyset_cursor"]
+        assert cursor_two
 
-    assert page_two["error"]["category"] == "invalid_request"
+        page_three = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor_two,
+                page_size=30,
+            )
+        )
+
+    assert page_three["error"]["category"] == "invalid_request"
     assert (
-        page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
+        page_three["error"]["details_safe"]["reason_code"]
+        == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
     )
-    metadata = page_two["metadata"]
+    metadata = page_three["metadata"]
     assert metadata["pagination.budget.exhausted"] is True
     assert metadata["pagination.budget.reason_code"] == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
     assert metadata["pagination.budget.rows_remaining_bucket"] in {
@@ -4700,6 +4720,9 @@ async def test_execute_sql_query_keyset_boundary_continuation_rejected_after_exa
             )
         )
         assert "error" not in page_two
+        assert len(page_two["rows"]) == 40
+        assert page_two["metadata"]["page_size"] == 40
+        assert page_two["metadata"]["pagination.keyset.page_size_effective"] == 40
         assert page_two["metadata"]["pagination.budget.exhausted"] is True
         cursor_two = page_two["metadata"]["next_keyset_cursor"]
         assert cursor_two
@@ -4723,8 +4746,10 @@ async def test_execute_sql_query_keyset_boundary_continuation_rejected_after_exa
 
 
 @pytest.mark.asyncio
-async def test_execute_sql_query_keyset_rejects_when_global_byte_budget_exceeded(monkeypatch):
-    """Second page should fail closed when cumulative bytes exceed request budget."""
+async def test_execute_sql_query_keyset_rejects_when_no_safe_page_size_can_be_served(
+    monkeypatch,
+):
+    """Continuation should fail closed when remaining byte budget cannot safely fit one row."""
     caps = SimpleNamespace(
         provider_name="postgres",
         tenant_enforcement_mode="rls_session",
@@ -4783,7 +4808,105 @@ async def test_execute_sql_query_keyset_rejects_when_global_byte_budget_exceeded
 
     assert page_two["error"]["category"] == "invalid_request"
     assert (
-        page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED"
+        page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_SESSION_NO_SAFE_PAGE_SIZE"
+    )
+    assert (
+        page_two["metadata"]["pagination.budget.reason_code"]
+        == "PAGINATION_SESSION_NO_SAFE_PAGE_SIZE"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_long_session_repeated_adaptive_shrink(monkeypatch):
+    """Long keyset chains should repeatedly shrink as session byte budget tightens."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id, blob FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "1000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "1700")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.calls = 0
+
+            async def fetch(self, _query, *_args):
+                self.calls += 1
+                if self.calls == 1:
+                    return [{"id": i, "blob": "a" * 20} for i in range(11)]
+                if self.calls == 2:
+                    return [{"id": 100 + i, "blob": "b" * 70} for i in range(11)]
+                if self.calls >= 3:
+                    return [{"id": 200 + i, "blob": "c" * 50} for i in range(11)]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        page_one = json.loads(
+            await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=10)
+        )
+        assert "error" not in page_one
+        cursor_one = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor_one
+
+        page_two = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor_one,
+                page_size=10,
+            )
+        )
+        assert "error" not in page_two
+        cursor_two = page_two["metadata"]["next_keyset_cursor"]
+        assert cursor_two
+
+        page_three = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor_two,
+                page_size=10,
+            )
+        )
+        assert "error" not in page_three
+        cursor_three = page_three["metadata"]["next_keyset_cursor"]
+        assert cursor_three
+
+        page_four = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor_three,
+                page_size=10,
+            )
+        )
+
+    assert page_two["metadata"]["page_size"] == 10
+    assert page_three["metadata"]["page_size"] < page_two["metadata"]["page_size"]
+    assert (
+        page_four["error"]["details_safe"]["reason_code"] == "PAGINATION_SESSION_NO_SAFE_PAGE_SIZE"
     )
 
 

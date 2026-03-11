@@ -8,6 +8,7 @@ from dal.execution_budget import (
     ExecutionBudget,
     ExecutionBudgetExceededError,
     ExecutionBudgetSnapshotError,
+    compute_effective_page_size,
 )
 
 
@@ -87,3 +88,60 @@ def test_execution_budget_consume_rejects_when_row_budget_exceeded():
         budget.consume(rows=21, bytes_returned=100, duration_ms=50)
 
     assert exc_info.value.reason_code == PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED
+
+
+def test_compute_effective_page_size_respects_remaining_row_budget() -> None:
+    """Row budget should cap effective page size deterministically."""
+    assert (
+        compute_effective_page_size(
+            requested_page_size=100,
+            remaining_row_budget=25,
+            remaining_byte_budget=None,
+            estimated_avg_row_bytes=None,
+        )
+        == 25
+    )
+
+
+def test_compute_effective_page_size_respects_remaining_byte_budget() -> None:
+    """Byte budget + row estimate should cap effective page size deterministically."""
+    assert (
+        compute_effective_page_size(
+            requested_page_size=100,
+            remaining_row_budget=None,
+            remaining_byte_budget=1_000,
+            estimated_avg_row_bytes=100,
+        )
+        == 10
+    )
+
+
+def test_compute_effective_page_size_returns_zero_when_no_safe_page() -> None:
+    """Zero remaining budget should fail closed with no safe page."""
+    assert (
+        compute_effective_page_size(
+            requested_page_size=100,
+            remaining_row_budget=0,
+            remaining_byte_budget=None,
+            estimated_avg_row_bytes=None,
+        )
+        == 0
+    )
+
+
+def test_compute_effective_page_size_missing_byte_estimate_is_deterministic() -> None:
+    """Missing byte estimate must fall back to row-budget-only sizing."""
+    first = compute_effective_page_size(
+        requested_page_size=100,
+        remaining_row_budget=25,
+        remaining_byte_budget=10,
+        estimated_avg_row_bytes=None,
+    )
+    second = compute_effective_page_size(
+        requested_page_size=100,
+        remaining_row_budget=25,
+        remaining_byte_budget=10,
+        estimated_avg_row_bytes=None,
+    )
+    assert first == 25
+    assert second == 25

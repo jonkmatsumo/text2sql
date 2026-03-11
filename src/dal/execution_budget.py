@@ -13,6 +13,8 @@ PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED = "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
 PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED = "PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED"
 PAGINATION_GLOBAL_TIME_BUDGET_EXCEEDED = "PAGINATION_GLOBAL_TIME_BUDGET_EXCEEDED"
 PAGINATION_BUDGET_SNAPSHOT_INVALID = "PAGINATION_BUDGET_SNAPSHOT_INVALID"
+PAGINATION_SESSION_NO_SAFE_PAGE_SIZE = "PAGINATION_SESSION_NO_SAFE_PAGE_SIZE"
+PAGINATION_SESSION_PAGE_SIZE_ADJUSTED = "PAGINATION_SESSION_PAGE_SIZE_ADJUSTED"
 
 _BUDGET_INT_MAX = 2_147_483_647
 
@@ -61,6 +63,40 @@ def _parse_positive_int(value: Any, *, field_name: str) -> int:
             f"Invalid pagination budget snapshot: {field_name} must be greater than zero."
         )
     return parsed
+
+
+def compute_effective_page_size(
+    requested_page_size: int,
+    remaining_row_budget: int | None,
+    remaining_byte_budget: int | None,
+    estimated_avg_row_bytes: int | None,
+) -> int:
+    """Compute the largest safe page size bounded by remaining session budgets."""
+    if isinstance(requested_page_size, bool):
+        return 0
+    requested = int(requested_page_size)
+    if requested <= 0:
+        return 0
+    effective_page_size = min(requested, _BUDGET_INT_MAX)
+
+    if remaining_row_budget is not None:
+        if isinstance(remaining_row_budget, bool):
+            return 0
+        bounded_remaining_rows = max(0, min(int(remaining_row_budget), _BUDGET_INT_MAX))
+        effective_page_size = min(effective_page_size, bounded_remaining_rows)
+
+    # Byte-budget sizing only applies when we have both a budget and a stable row-size estimate.
+    if remaining_byte_budget is not None and estimated_avg_row_bytes is not None:
+        if isinstance(remaining_byte_budget, bool) or isinstance(estimated_avg_row_bytes, bool):
+            return 0
+        bounded_remaining_bytes = max(0, min(int(remaining_byte_budget), _BUDGET_INT_MAX))
+        bounded_avg_row_bytes = max(1, min(int(estimated_avg_row_bytes), _BUDGET_INT_MAX))
+        byte_budget_limited_rows = bounded_remaining_bytes // bounded_avg_row_bytes
+        effective_page_size = min(effective_page_size, byte_budget_limited_rows)
+
+    if effective_page_size < 1:
+        return 0
+    return int(effective_page_size)
 
 
 @dataclass(frozen=True)

@@ -177,6 +177,52 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.session.pages_served_bucket",
         serialization_alias="pagination.session.pages_served_bucket",
     )
+    pagination_session_page_size_requested: Optional[int] = Field(
+        None,
+        description="Requested page size before adaptive session-budget sizing",
+        validation_alias="pagination.session.page_size_requested",
+        serialization_alias="pagination.session.page_size_requested",
+    )
+    pagination_session_page_size_effective: Optional[int] = Field(
+        None,
+        description="Effective page size selected after adaptive session-budget sizing",
+        validation_alias="pagination.session.page_size_effective",
+        serialization_alias="pagination.session.page_size_effective",
+    )
+    pagination_session_page_size_adjusted: Optional[bool] = Field(
+        None,
+        description="True when session-budget adaptation reduced continuation page size",
+        validation_alias="pagination.session.page_size_adjusted",
+        serialization_alias="pagination.session.page_size_adjusted",
+    )
+    pagination_session_page_size_adjusted_reason_code: Optional[str] = Field(
+        None,
+        description="Stable reason code when continuation page size was adaptively reduced",
+        validation_alias="pagination.session.page_size_adjusted_reason_code",
+        serialization_alias="pagination.session.page_size_adjusted_reason_code",
+    )
+    pagination_session_remaining_rows_bucket: Optional[
+        Literal["0", "1_10", "11_100", "101_500", "501_plus"]
+    ] = Field(
+        None,
+        description="Bucketed remaining row budget before adaptive continuation sizing",
+        validation_alias="pagination.session.remaining_rows_bucket",
+        serialization_alias="pagination.session.remaining_rows_bucket",
+    )
+    pagination_session_remaining_bytes_bucket: Optional[
+        Literal["0", "1_1k", "1k_16k", "16k_256k", "256k_plus"]
+    ] = Field(
+        None,
+        description="Bucketed remaining byte budget before adaptive continuation sizing",
+        validation_alias="pagination.session.remaining_bytes_bucket",
+        serialization_alias="pagination.session.remaining_bytes_bucket",
+    )
+    pagination_session_no_safe_page: Optional[bool] = Field(
+        None,
+        description="True when no safe continuation page size could be served",
+        validation_alias="pagination.session.no_safe_page",
+        serialization_alias="pagination.session.no_safe_page",
+    )
     next_keyset_cursor: Optional[str] = Field(
         None, description="Opaque cursor for the next page when using keyset pagination"
     )
