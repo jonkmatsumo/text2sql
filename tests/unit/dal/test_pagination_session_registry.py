@@ -1,4 +1,5 @@
 import re
+from dataclasses import replace
 
 import pytest
 
@@ -131,6 +132,81 @@ def test_record_access_returns_none_for_revoked_session() -> None:
     assert loaded.is_revoked is True
     assert loaded.pages_served_count == 0
     assert loaded.last_accessed_at_ms is None
+
+
+def test_record_access_updates_bounded_row_size_estimate_after_successful_page() -> None:
+    """Successful continuation pages should update rolling row-size estimate deterministically."""
+    now_state = {"value": 1_700_000_000_000}
+    registry = InMemoryPaginationSessionRegistry(now_ms=lambda: now_state["value"])
+    session = create_pagination_session(
+        tenant_id="tenant-12",
+        provider_name="postgres",
+        pagination_mode="offset",
+        query_scope_fp="scope-fp-12",
+        policy_snapshot_fp="policy-fp-12",
+        revocation_epoch=0,
+        now_epoch_milliseconds=now_state["value"],
+    )
+    registry.put(session)
+
+    now_state["value"] = 1_700_000_000_100
+    first = registry.record_access(
+        session.session_id,
+        page_row_count=2,
+        page_bytes=200,
+    )
+    now_state["value"] = 1_700_000_000_200
+    second = registry.record_access(
+        session.session_id,
+        page_row_count=4,
+        page_bytes=600,
+    )
+
+    assert first is not None
+    assert first.avg_row_bytes_estimate == 100
+    assert first.last_page_row_count == 2
+    assert first.last_page_bytes == 200
+    assert second is not None
+    # Weighted update: (100*3 + 150) // 4 = 112
+    assert second.avg_row_bytes_estimate == 112
+    assert second.last_page_row_count == 4
+    assert second.last_page_bytes == 600
+
+
+def test_record_access_on_rejected_session_does_not_mutate_row_size_estimate() -> None:
+    """Rejected continuation attempts must not mutate rolling row-size state."""
+    now_state = {"value": 1_700_000_000_000}
+    registry = InMemoryPaginationSessionRegistry(now_ms=lambda: now_state["value"])
+    base_session = create_pagination_session(
+        tenant_id="tenant-13",
+        provider_name="postgres",
+        pagination_mode="keyset",
+        query_scope_fp="scope-fp-13",
+        policy_snapshot_fp="policy-fp-13",
+        revocation_epoch=0,
+        now_epoch_milliseconds=now_state["value"],
+    )
+    seeded_session = replace(
+        base_session,
+        avg_row_bytes_estimate=120,
+        last_page_row_count=3,
+        last_page_bytes=360,
+    )
+    registry.put(seeded_session)
+    registry.revoke_session(seeded_session.session_id)
+
+    updated = registry.record_access(
+        seeded_session.session_id,
+        page_row_count=10,
+        page_bytes=10_000,
+    )
+    loaded = registry.get(seeded_session.session_id)
+
+    assert updated is None
+    assert loaded is not None
+    assert loaded.avg_row_bytes_estimate == 120
+    assert loaded.last_page_row_count == 3
+    assert loaded.last_page_bytes == 360
 
 
 def test_registry_ttl_expiry_evicts_stale_session() -> None:

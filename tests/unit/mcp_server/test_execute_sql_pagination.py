@@ -6,6 +6,7 @@ import hmac
 import json
 import time
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -1528,6 +1529,214 @@ async def test_execute_sql_query_offset_continuation_adapts_page_size_to_remaini
 
     assert third["error"]["category"] == "invalid_request"
     assert third["error"]["details_safe"]["reason_code"] == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_continuation_uses_session_row_size_estimate(monkeypatch):
+    """Continuation should use session rolling row-size estimate when budget snapshot lacks one."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "1000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "1000000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+
+    base_session = create_pagination_session(
+        tenant_id="1",
+        provider_name="postgres",
+        pagination_mode="offset",
+        query_scope_fp=_TEST_SCOPE_FP,
+        policy_snapshot_fp=_default_policy_snapshot_fp(),
+        revocation_epoch=0,
+    )
+    seeded_session = replace(
+        base_session,
+        avg_row_bytes_estimate=60,
+        last_page_row_count=2,
+        last_page_bytes=120,
+    )
+    get_default_pagination_session_registry().put(seeded_session)
+
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql=sql,
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=4,
+        fingerprint=fingerprint,
+        issued_at=int(time.time()),
+        secret=_TEST_SECRET,
+        scope_fp=_TEST_SCOPE_FP,
+        budget_snapshot={
+            "max_total_rows": 1000,
+            "max_total_bytes": 100,
+            "max_total_duration_ms": 100000,
+            "consumed_rows": 0,
+            "consumed_bytes": 0,
+            "consumed_duration_ms": 0,
+        },
+        pagination_session_id=seeded_session.session_id,
+    )
+
+    class _Conn:
+        async def fetch(self, sql_text, *params):
+            _ = params
+            if "LIMIT 2 OFFSET 0" in sql_text:
+                return [{"id": 1}, {"id": 2}]
+            return []
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_args, **_kwargs: _conn_ctx(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(sql, tenant_id=1, page_size=4, page_token=token)
+
+    result = json.loads(payload)
+    assert "error" not in result
+    assert len(result["rows"]) == 1
+    assert result["metadata"]["page_size"] == 1
+    assert result["metadata"]["next_page_token"]
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_rejected_continuation_does_not_mutate_session_estimate(
+    monkeypatch,
+):
+    """Rejected continuation must not mutate session rolling row-size estimate fields."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "1000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "1000000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+
+    base_session = create_pagination_session(
+        tenant_id="1",
+        provider_name="postgres",
+        pagination_mode="offset",
+        query_scope_fp=_TEST_SCOPE_FP,
+        policy_snapshot_fp=_default_policy_snapshot_fp(),
+        revocation_epoch=0,
+    )
+    seeded_session = replace(
+        base_session,
+        avg_row_bytes_estimate=120,
+        last_page_row_count=3,
+        last_page_bytes=360,
+    )
+    registry = get_default_pagination_session_registry()
+    registry.put(seeded_session)
+
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql=sql,
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=4,
+        fingerprint=fingerprint,
+        issued_at=int(time.time()),
+        secret=_TEST_SECRET,
+        scope_fp=_TEST_SCOPE_FP,
+        budget_snapshot={
+            "max_total_rows": 1000,
+            "max_total_bytes": 50,
+            "max_total_duration_ms": 100000,
+            "consumed_rows": 0,
+            "consumed_bytes": 0,
+            "consumed_duration_ms": 0,
+        },
+        pagination_session_id=seeded_session.session_id,
+    )
+
+    class _Conn:
+        async def fetch(self, *_args, **_kwargs):
+            raise AssertionError("Continuation should fail before executing SQL.")
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_args, **_kwargs: _conn_ctx(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(sql, tenant_id=1, page_size=4, page_token=token)
+
+    result = json.loads(payload)
+    assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_SESSION_NO_SAFE_PAGE_SIZE"
+    loaded = registry.get(seeded_session.session_id)
+    assert loaded is not None
+    assert loaded.avg_row_bytes_estimate == 120
+    assert loaded.last_page_row_count == 3
+    assert loaded.last_page_bytes == 360
 
 
 @pytest.mark.asyncio

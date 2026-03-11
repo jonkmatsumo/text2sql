@@ -1900,6 +1900,16 @@ def _estimate_avg_row_bytes_from_execution_budget(budget: ExecutionBudget) -> in
     return max(1, (consumed_bytes + consumed_rows - 1) // consumed_rows)
 
 
+def _session_avg_row_bytes_estimate(session: Any) -> int | None:
+    """Return bounded row-size estimate from session state when present."""
+    raw_estimate = getattr(session, "avg_row_bytes_estimate", None)
+    if isinstance(raw_estimate, bool) or not isinstance(raw_estimate, int):
+        return None
+    if raw_estimate <= 0:
+        return None
+    return int(raw_estimate)
+
+
 def _record_result_contract_observability(
     *,
     partial: bool,
@@ -4244,9 +4254,13 @@ async def handler(
                         return _budget_violation_response(pre_exhaustion_reason)
                     if effective_page_size is not None:
                         requested_keyset_page_size = int(effective_page_size)
-                        estimated_avg_row_bytes = _estimate_avg_row_bytes_from_execution_budget(
-                            execution_budget
+                        estimated_avg_row_bytes = _session_avg_row_bytes_estimate(
+                            pagination_session
                         )
+                        if estimated_avg_row_bytes is None:
+                            estimated_avg_row_bytes = _estimate_avg_row_bytes_from_execution_budget(
+                                execution_budget
+                            )
                         adaptive_keyset_page_size = compute_effective_page_size(
                             requested_page_size=requested_keyset_page_size,
                             remaining_row_budget=execution_budget.rows_remaining,
@@ -4474,9 +4488,13 @@ async def handler(
                             if effective_page_size is None
                             else int(effective_page_size)
                         )
-                        estimated_avg_row_bytes = _estimate_avg_row_bytes_from_execution_budget(
-                            execution_budget
+                        estimated_avg_row_bytes = _session_avg_row_bytes_estimate(
+                            pagination_session
                         )
+                        if estimated_avg_row_bytes is None:
+                            estimated_avg_row_bytes = _estimate_avg_row_bytes_from_execution_budget(
+                                execution_budget
+                            )
                         adaptive_offset_page_size = compute_effective_page_size(
                             requested_page_size=requested_offset_page_size,
                             remaining_row_budget=execution_budget.rows_remaining,
@@ -4829,7 +4847,11 @@ async def handler(
         cap_mitigation_applied = False
         cap_mitigation_mode = "none"
         if pagination_session_continuation_validated and pagination_session_id is not None:
-            updated_session = pagination_session_registry.record_access(pagination_session_id)
+            updated_session = pagination_session_registry.record_access(
+                pagination_session_id,
+                page_row_count=len(result_rows),
+                page_bytes=bytes_returned,
+            )
             if updated_session is None:
                 reason_code = PAGINATION_SESSION_UNKNOWN
                 current_session = pagination_session_registry.get(pagination_session_id)

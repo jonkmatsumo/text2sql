@@ -50,6 +50,9 @@ class PaginationSession:
     is_revoked: bool = False
     last_accessed_at_ms: int | None = None
     pages_served_count: int = 0
+    avg_row_bytes_estimate: int | None = None
+    last_page_row_count: int | None = None
+    last_page_bytes: int | None = None
 
     def __post_init__(self) -> None:
         """Fail closed for malformed, unbounded, or unsafe session payloads."""
@@ -110,6 +113,21 @@ class PaginationSession:
             raise ValueError("Pagination session pages_served_count must be an integer.")
         if self.pages_served_count < 0 or self.pages_served_count > CURSOR_MAX_SIGNED_INT:
             raise ValueError("Pagination session pages_served_count is out of bounds.")
+        self._validate_optional_metric(
+            "avg_row_bytes_estimate",
+            self.avg_row_bytes_estimate,
+            allow_zero=False,
+        )
+        self._validate_optional_metric(
+            "last_page_row_count",
+            self.last_page_row_count,
+            allow_zero=True,
+        )
+        self._validate_optional_metric(
+            "last_page_bytes",
+            self.last_page_bytes,
+            allow_zero=True,
+        )
 
     @staticmethod
     def _validate_required_field(name: str, value: str, max_length: int) -> None:
@@ -120,6 +138,16 @@ class PaginationSession:
             raise ValueError(f"Pagination session {name} must not be empty.")
         if len(normalized) > max_length:
             raise ValueError(f"Pagination session {name} exceeds maximum length.")
+
+    @staticmethod
+    def _validate_optional_metric(name: str, value: int | None, *, allow_zero: bool) -> None:
+        if value is None:
+            return
+        if not isinstance(value, int):
+            raise ValueError(f"Pagination session {name} must be an integer when provided.")
+        minimum = 0 if allow_zero else 1
+        if value < minimum or value > CURSOR_MAX_SIGNED_INT:
+            raise ValueError(f"Pagination session {name} is out of bounds.")
 
 
 def generate_pagination_session_id() -> str:
@@ -180,7 +208,13 @@ class PaginationSessionRegistry(Protocol):
     def revoke(self, session_id: str) -> PaginationSession | None:
         """Backward-compatible alias for revoke_session."""
 
-    def record_access(self, session_id: str) -> PaginationSession | None:
+    def record_access(
+        self,
+        session_id: str,
+        *,
+        page_row_count: int | None = None,
+        page_bytes: int | None = None,
+    ) -> PaginationSession | None:
         """Increment continuation audit counters for a successful page retrieval."""
 
 
@@ -260,11 +294,19 @@ class InMemoryPaginationSessionRegistry(PaginationSessionRegistry):
         """Backward-compatible alias for revoke_session."""
         return self.revoke_session(session_id)
 
-    def record_access(self, session_id: str) -> PaginationSession | None:
+    def record_access(
+        self,
+        session_id: str,
+        *,
+        page_row_count: int | None = None,
+        page_bytes: int | None = None,
+    ) -> PaginationSession | None:
         """Update bounded audit state after a successful continuation request."""
         normalized_session_id = normalize_pagination_session_id(session_id)
         if normalized_session_id is None:
             return None
+        normalized_page_row_count = self._normalize_optional_metric(page_row_count)
+        normalized_page_bytes = self._normalize_optional_metric(page_bytes)
         now_ms = self._safe_now_ms()
         with self._lock:
             self._evict_expired_locked(now_ms)
@@ -272,10 +314,36 @@ class InMemoryPaginationSessionRegistry(PaginationSessionRegistry):
             if session is None or session.is_revoked:
                 return None
             next_pages_served_count = min(CURSOR_MAX_SIGNED_INT, session.pages_served_count + 1)
+            next_avg_row_bytes_estimate = session.avg_row_bytes_estimate
+            if (
+                normalized_page_row_count is not None
+                and normalized_page_bytes is not None
+                and normalized_page_row_count > 0
+            ):
+                sample_avg_row_bytes = max(1, normalized_page_bytes // normalized_page_row_count)
+                current_estimate = session.avg_row_bytes_estimate
+                if current_estimate is None or current_estimate <= 0:
+                    next_avg_row_bytes_estimate = sample_avg_row_bytes
+                else:
+                    next_avg_row_bytes_estimate = min(
+                        CURSOR_MAX_SIGNED_INT,
+                        max(1, (int(current_estimate) * 3 + sample_avg_row_bytes) // 4),
+                    )
             updated = replace(
                 session,
                 pages_served_count=next_pages_served_count,
                 last_accessed_at_ms=now_ms,
+                avg_row_bytes_estimate=next_avg_row_bytes_estimate,
+                last_page_row_count=(
+                    normalized_page_row_count
+                    if normalized_page_row_count is not None
+                    else session.last_page_row_count
+                ),
+                last_page_bytes=(
+                    normalized_page_bytes
+                    if normalized_page_bytes is not None
+                    else session.last_page_bytes
+                ),
             )
             self._sessions[normalized_session_id] = updated
             self._sessions.move_to_end(normalized_session_id)
@@ -291,6 +359,20 @@ class InMemoryPaginationSessionRegistry(PaginationSessionRegistry):
         if now_ms < 0:
             return 0
         return min(now_ms, CURSOR_MAX_SIGNED_INT)
+
+    @staticmethod
+    def _normalize_optional_metric(value: int | None) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed < 0:
+            return None
+        return min(parsed, CURSOR_MAX_SIGNED_INT)
 
     def _evict_expired_locked(self, now_ms: int) -> None:
         while self._sessions:
@@ -328,11 +410,17 @@ def revoke_session(
 def record_session_access(
     session_id: str,
     *,
+    page_row_count: int | None = None,
+    page_bytes: int | None = None,
     registry: PaginationSessionRegistry | None = None,
 ) -> PaginationSession | None:
     """Record successful continuation access in the provided/default registry."""
     active_registry = registry or get_default_pagination_session_registry()
-    return active_registry.record_access(session_id)
+    return active_registry.record_access(
+        session_id,
+        page_row_count=page_row_count,
+        page_bytes=page_bytes,
+    )
 
 
 def normalize_pagination_session_id(session_id: str) -> str | None:
