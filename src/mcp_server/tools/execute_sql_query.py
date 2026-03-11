@@ -40,10 +40,13 @@ from dal.execution_budget import (
     PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED,
     PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED,
     PAGINATION_GLOBAL_TIME_BUDGET_EXCEEDED,
+    PAGINATION_SESSION_NO_SAFE_PAGE_SIZE,
+    PAGINATION_SESSION_PAGE_SIZE_ADJUSTED,
     ExecutionBudget,
     ExecutionBudgetExceededError,
     ExecutionBudgetSnapshotError,
     bytes_remaining_bucket,
+    compute_effective_page_size,
     rows_remaining_bucket,
 )
 from dal.execution_resource_limits import ExecutionResourceLimits
@@ -198,6 +201,7 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     PAGINATION_SESSION_UNKNOWN,
     PAGINATION_SESSION_REVOKED,
     PAGINATION_SESSION_SCOPE_MISMATCH,
+    PAGINATION_SESSION_NO_SAFE_PAGE_SIZE,
     "KEYSET_CURSOR_ORDERBY_SIGNATURE_MISSING",
     PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED,
     PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED,
@@ -235,6 +239,8 @@ _PAGINATION_BUDGET_REASON_ALLOWLIST = {
     PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED,
     PAGINATION_GLOBAL_TIME_BUDGET_EXCEEDED,
     PAGINATION_BUDGET_SNAPSHOT_INVALID,
+    PAGINATION_SESSION_NO_SAFE_PAGE_SIZE,
+    PAGINATION_SESSION_PAGE_SIZE_ADJUSTED,
 }
 _CURSOR_VALIDATION_OUTCOME_ALLOWLIST = {
     "OK",
@@ -1884,6 +1890,16 @@ def _rolling_average_row_size_bytes(rows: Sequence[dict[str, Any]]) -> int | Non
     return max(1, int(round(running_average)))
 
 
+def _estimate_avg_row_bytes_from_execution_budget(budget: ExecutionBudget) -> int | None:
+    """Estimate row size from prior page consumption in a fail-closed conservative way."""
+    consumed_rows = max(0, int(getattr(budget, "consumed_rows", 0)))
+    consumed_bytes = max(0, int(getattr(budget, "consumed_bytes", 0)))
+    if consumed_rows <= 0 or consumed_bytes <= 0:
+        return None
+    # Ceiling division is intentionally conservative to avoid byte-budget overshoot.
+    return max(1, (consumed_bytes + consumed_rows - 1) // consumed_rows)
+
+
 def _record_result_contract_observability(
     *,
     partial: bool,
@@ -2910,6 +2926,28 @@ async def handler(
         return _construct_error_response(
             execution_started_at,
             message="Pagination request exceeds the configured global execution budget.",
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+            metadata={"reason_code": reason_code},
+            envelope_metadata=tenant_enforcement_metadata,
+        )
+
+    def _no_safe_page_size_response() -> str:
+        reason_code = PAGINATION_SESSION_NO_SAFE_PAGE_SIZE
+        _apply_execution_budget_metadata(
+            tenant_enforcement_metadata,
+            execution_budget,
+            reason_code=reason_code,
+        )
+        tenant_enforcement_metadata["pagination.reject_reason_code"] = reason_code
+        if pagination_mode == "keyset":
+            tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = reason_code
+        return _construct_error_response(
+            execution_started_at,
+            message=(
+                "Pagination continuation cannot serve a safe page within the remaining "
+                "session budget."
+            ),
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
             metadata={"reason_code": reason_code},
@@ -4204,6 +4242,37 @@ async def handler(
                     pre_exhaustion_reason = execution_budget.exhausted_reason_code()
                     if pre_exhaustion_reason is not None:
                         return _budget_violation_response(pre_exhaustion_reason)
+                    if effective_page_size is not None:
+                        requested_keyset_page_size = int(effective_page_size)
+                        estimated_avg_row_bytes = _estimate_avg_row_bytes_from_execution_budget(
+                            execution_budget
+                        )
+                        adaptive_keyset_page_size = compute_effective_page_size(
+                            requested_page_size=requested_keyset_page_size,
+                            remaining_row_budget=execution_budget.rows_remaining,
+                            remaining_byte_budget=execution_budget.bytes_remaining,
+                            estimated_avg_row_bytes=estimated_avg_row_bytes,
+                        )
+                        if adaptive_keyset_page_size <= 0:
+                            return _no_safe_page_size_response()
+                        if adaptive_keyset_page_size != requested_keyset_page_size:
+                            tenant_enforcement_metadata[
+                                "pagination.session.page_size_adjusted_reason_code"
+                            ] = PAGINATION_SESSION_PAGE_SIZE_ADJUSTED
+                        effective_page_size = adaptive_keyset_page_size
+                        applied_page_size = adaptive_keyset_page_size
+                        tenant_enforcement_metadata["pagination.keyset.adaptive_page_size"] = (
+                            adaptive_keyset_page_size
+                        )
+                        tenant_enforcement_metadata["pagination.keyset.effective_page_size"] = (
+                            adaptive_keyset_page_size
+                        )
+                        tenant_enforcement_metadata["pagination.keyset.page_size_effective"] = (
+                            adaptive_keyset_page_size
+                        )
+                        tenant_enforcement_metadata["pagination.keyset.byte_budget"] = (
+                            execution_budget.bytes_remaining
+                        )
                     if len(keyset_values) != len(keyset_order_keys):
                         return _construct_error_response(
                             execution_started_at,
@@ -4256,6 +4325,7 @@ async def handler(
                 """Fetch rows from the database."""
                 nonlocal columns, next_token, offset_decode_metadata, offset_next_token_payload
                 nonlocal execution_budget
+                nonlocal effective_page_size, applied_page_size
                 nonlocal pagination_session, pagination_session_id
                 nonlocal pagination_session_continuation_validated
                 fetch_page = getattr(conn, "fetch_page", None)
@@ -4399,6 +4469,35 @@ async def handler(
                                     "Pagination token limit does not match requested page_size."
                                 ),
                             )
+                        requested_offset_page_size = int(
+                            token_payload.limit
+                            if effective_page_size is None
+                            else int(effective_page_size)
+                        )
+                        estimated_avg_row_bytes = _estimate_avg_row_bytes_from_execution_budget(
+                            execution_budget
+                        )
+                        adaptive_offset_page_size = compute_effective_page_size(
+                            requested_page_size=requested_offset_page_size,
+                            remaining_row_budget=execution_budget.rows_remaining,
+                            remaining_byte_budget=execution_budget.bytes_remaining,
+                            estimated_avg_row_bytes=estimated_avg_row_bytes,
+                        )
+                        if adaptive_offset_page_size <= 0:
+                            raise OffsetPaginationTokenError(
+                                reason_code=PAGINATION_SESSION_NO_SAFE_PAGE_SIZE,
+                                message=(
+                                    "Pagination continuation cannot serve a safe page within the "
+                                    "remaining session budget."
+                                ),
+                            )
+                        if adaptive_offset_page_size != requested_offset_page_size:
+                            tenant_enforcement_metadata[
+                                "pagination.session.page_size_adjusted_reason_code"
+                            ] = PAGINATION_SESSION_PAGE_SIZE_ADJUSTED
+                        pagination_limit = adaptive_offset_page_size
+                        effective_page_size = adaptive_offset_page_size
+                        applied_page_size = adaptive_offset_page_size
                     if pagination_limit <= 0:
                         raise OffsetPaginationTokenError(
                             reason_code="execution_pagination_page_size_invalid",
@@ -4509,7 +4608,12 @@ async def handler(
         if conn is not None:
             tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(conn))
 
-        if pagination_mode == "keyset" and applied_page_size is not None and applied_page_size > 0:
+        if (
+            pagination_mode == "keyset"
+            and not keyset_cursor
+            and applied_page_size is not None
+            and applied_page_size > 0
+        ):
             requested_page_size = int(applied_page_size)
             adaptive_page_size = requested_page_size
             byte_budget = max(0, int(resource_limits.max_bytes))

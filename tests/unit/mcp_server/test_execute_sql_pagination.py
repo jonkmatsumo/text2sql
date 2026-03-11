@@ -520,6 +520,7 @@ async def test_execute_sql_query_offset_pagination_token_mismatch_rejected():
             "mcp_server.tools.execute_sql_query.Database.get_connection",
             side_effect=lambda *_args, **_kwargs: _conn_ctx(),
         ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
         first_payload = await handler("SELECT 1 AS id", tenant_id=1, page_size=2)
@@ -1454,6 +1455,79 @@ async def test_execute_sql_query_offset_budget_snapshot_tamper_is_rejected():
     assert (
         result["metadata"]["pagination.reject_reason_code"] == "PAGINATION_BUDGET_SNAPSHOT_INVALID"
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_continuation_adapts_page_size_to_remaining_row_budget(
+    monkeypatch,
+):
+    """Offset continuation should shrink page size to fit remaining row budget."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "100")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "1000000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+
+    class _Conn:
+        async def fetch(self, sql_text, *params):
+            _ = params
+            if "LIMIT 81 OFFSET 0" in sql_text:
+                return [{"id": i} for i in range(81)]
+            if "LIMIT 21 OFFSET 80" in sql_text:
+                return [{"id": 1_000 + i} for i in range(21)]
+            if "LIMIT 21 OFFSET 100" in sql_text:
+                return [{"id": 2_000 + i} for i in range(21)]
+            return []
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_args, **_kwargs: _conn_ctx(),
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        first_payload = await handler(sql, tenant_id=1, page_size=80)
+        first = json.loads(first_payload)
+        assert "error" not in first
+        token = first["metadata"]["next_page_token"]
+        assert token
+
+        second_payload = await handler(sql, tenant_id=1, page_size=80, page_token=token)
+        second = json.loads(second_payload)
+        assert "error" not in second
+        assert len(second["rows"]) == 20
+        assert second["metadata"]["page_size"] == 20
+        next_token = second["metadata"]["next_page_token"]
+        assert next_token
+
+        third_payload = await handler(sql, tenant_id=1, page_size=80, page_token=next_token)
+        third = json.loads(third_payload)
+
+    assert third["error"]["category"] == "invalid_request"
+    assert third["error"]["details_safe"]["reason_code"] == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
 
 
 @pytest.mark.asyncio

@@ -4538,8 +4538,10 @@ async def test_execute_sql_query_keyset_budget_metadata_non_negative(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_execute_sql_query_keyset_rejects_when_global_row_budget_exceeded(monkeypatch):
-    """Second page should fail closed when cumulative rows exceed request budget."""
+async def test_execute_sql_query_keyset_continuation_adapts_page_size_to_remaining_row_budget(
+    monkeypatch,
+):
+    """Continuation should shrink keyset page size to remaining row budget before execution."""
     caps = SimpleNamespace(
         provider_name="postgres",
         tenant_enforcement_mode="rls_session",
@@ -4598,12 +4600,30 @@ async def test_execute_sql_query_keyset_rejects_when_global_row_budget_exceeded(
                 page_size=30,
             )
         )
+        assert "error" not in page_two
+        assert len(page_two["rows"]) == 20
+        assert page_two["metadata"]["page_size"] == 20
+        assert page_two["metadata"]["pagination.keyset.effective_page_size"] == 20
+        assert page_two["metadata"]["pagination.keyset.page_size_effective"] == 20
+        cursor_two = page_two["metadata"]["next_keyset_cursor"]
+        assert cursor_two
 
-    assert page_two["error"]["category"] == "invalid_request"
+        page_three = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor_two,
+                page_size=30,
+            )
+        )
+
+    assert page_three["error"]["category"] == "invalid_request"
     assert (
-        page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
+        page_three["error"]["details_safe"]["reason_code"]
+        == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
     )
-    metadata = page_two["metadata"]
+    metadata = page_three["metadata"]
     assert metadata["pagination.budget.exhausted"] is True
     assert metadata["pagination.budget.reason_code"] == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
     assert metadata["pagination.budget.rows_remaining_bucket"] in {
@@ -4700,6 +4720,9 @@ async def test_execute_sql_query_keyset_boundary_continuation_rejected_after_exa
             )
         )
         assert "error" not in page_two
+        assert len(page_two["rows"]) == 40
+        assert page_two["metadata"]["page_size"] == 40
+        assert page_two["metadata"]["pagination.keyset.page_size_effective"] == 40
         assert page_two["metadata"]["pagination.budget.exhausted"] is True
         cursor_two = page_two["metadata"]["next_keyset_cursor"]
         assert cursor_two
@@ -4723,8 +4746,10 @@ async def test_execute_sql_query_keyset_boundary_continuation_rejected_after_exa
 
 
 @pytest.mark.asyncio
-async def test_execute_sql_query_keyset_rejects_when_global_byte_budget_exceeded(monkeypatch):
-    """Second page should fail closed when cumulative bytes exceed request budget."""
+async def test_execute_sql_query_keyset_rejects_when_no_safe_page_size_can_be_served(
+    monkeypatch,
+):
+    """Continuation should fail closed when remaining byte budget cannot safely fit one row."""
     caps = SimpleNamespace(
         provider_name="postgres",
         tenant_enforcement_mode="rls_session",
@@ -4783,7 +4808,11 @@ async def test_execute_sql_query_keyset_rejects_when_global_byte_budget_exceeded
 
     assert page_two["error"]["category"] == "invalid_request"
     assert (
-        page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED"
+        page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_SESSION_NO_SAFE_PAGE_SIZE"
+    )
+    assert (
+        page_two["metadata"]["pagination.budget.reason_code"]
+        == "PAGINATION_SESSION_NO_SAFE_PAGE_SIZE"
     )
 
 
