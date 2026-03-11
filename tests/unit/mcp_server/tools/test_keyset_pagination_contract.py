@@ -4817,6 +4817,100 @@ async def test_execute_sql_query_keyset_rejects_when_no_safe_page_size_can_be_se
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_keyset_long_session_repeated_adaptive_shrink(monkeypatch):
+    """Long keyset chains should repeatedly shrink as session byte budget tightens."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id, blob FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "1000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "1700")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.calls = 0
+
+            async def fetch(self, _query, *_args):
+                self.calls += 1
+                if self.calls == 1:
+                    return [{"id": i, "blob": "a" * 20} for i in range(11)]
+                if self.calls == 2:
+                    return [{"id": 100 + i, "blob": "b" * 70} for i in range(11)]
+                if self.calls >= 3:
+                    return [{"id": 200 + i, "blob": "c" * 50} for i in range(11)]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        page_one = json.loads(
+            await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=10)
+        )
+        assert "error" not in page_one
+        cursor_one = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor_one
+
+        page_two = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor_one,
+                page_size=10,
+            )
+        )
+        assert "error" not in page_two
+        cursor_two = page_two["metadata"]["next_keyset_cursor"]
+        assert cursor_two
+
+        page_three = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor_two,
+                page_size=10,
+            )
+        )
+        assert "error" not in page_three
+        cursor_three = page_three["metadata"]["next_keyset_cursor"]
+        assert cursor_three
+
+        page_four = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor_three,
+                page_size=10,
+            )
+        )
+
+    assert page_two["metadata"]["page_size"] == 10
+    assert page_three["metadata"]["page_size"] < page_two["metadata"]["page_size"]
+    assert (
+        page_four["error"]["details_safe"]["reason_code"] == "PAGINATION_SESSION_NO_SAFE_PAGE_SIZE"
+    )
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_keyset_rejects_when_global_time_budget_exceeded(monkeypatch):
     """Second page should fail closed when cumulative duration exceeds request budget."""
     caps = SimpleNamespace(

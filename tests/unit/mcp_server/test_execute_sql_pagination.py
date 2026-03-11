@@ -1,5 +1,6 @@
 """Tests for execute_sql_query pagination handling."""
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -1825,6 +1826,206 @@ async def test_execute_sql_query_offset_rejected_continuation_does_not_mutate_se
     assert loaded.avg_row_bytes_estimate == 120
     assert loaded.last_page_row_count == 3
     assert loaded.last_page_bytes == 360
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_revocation_wins_over_adaptive_page_sizing(monkeypatch):
+    """Session revocation must reject before adaptive continuation page sizing is evaluated."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "1000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "1000000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+
+    session = create_pagination_session(
+        tenant_id="1",
+        provider_name="postgres",
+        pagination_mode="offset",
+        query_scope_fp=_TEST_SCOPE_FP,
+        policy_snapshot_fp=_default_policy_snapshot_fp(),
+        revocation_epoch=0,
+    )
+    registry = get_default_pagination_session_registry()
+    registry.put(session)
+    registry.revoke_session(session.session_id)
+
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql=sql,
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=10,
+        fingerprint=fingerprint,
+        issued_at=int(time.time()),
+        secret=_TEST_SECRET,
+        scope_fp=_TEST_SCOPE_FP,
+        budget_snapshot={
+            "max_total_rows": 1000,
+            "max_total_bytes": 50,
+            "max_total_duration_ms": 100000,
+            "consumed_rows": 0,
+            "consumed_bytes": 0,
+            "consumed_duration_ms": 0,
+        },
+        pagination_session_id=session.session_id,
+    )
+
+    class _Conn:
+        async def fetch(self, *_args, **_kwargs):
+            raise AssertionError("Revoked sessions should fail before SQL execution.")
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_args, **_kwargs: _conn_ctx(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(sql, tenant_id=1, page_size=10, page_token=token)
+
+    result = json.loads(payload)
+    assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_SESSION_REVOKED"
+    assert result["metadata"]["pagination.session.revoked"] is True
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_adaptive_continuation_still_respects_timeout(monkeypatch):
+    """Adaptive continuation sizing must not bypass hard timeout enforcement semantics."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "100")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "1000000")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+
+    session = create_pagination_session(
+        tenant_id="1",
+        provider_name="postgres",
+        pagination_mode="offset",
+        query_scope_fp=_TEST_SCOPE_FP,
+        policy_snapshot_fp=_default_policy_snapshot_fp(),
+        revocation_epoch=0,
+    )
+    get_default_pagination_session_registry().put(session)
+
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql=sql,
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=20,
+        fingerprint=fingerprint,
+        issued_at=int(time.time()),
+        secret=_TEST_SECRET,
+        scope_fp=_TEST_SCOPE_FP,
+        budget_snapshot={
+            "max_total_rows": 100,
+            "max_total_bytes": 1000000,
+            "max_total_duration_ms": 100,
+            "consumed_rows": 90,
+            "consumed_bytes": 0,
+            "consumed_duration_ms": 0,
+        },
+        pagination_session_id=session.session_id,
+    )
+
+    class _Conn:
+        async def fetch(self, sql_text, *params):
+            _ = (sql_text, params)
+            return [{"id": i} for i in range(21)]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    async def _timeout_after_fetch(operation, timeout_seconds, cancel=None, **_kwargs):
+        _ = (timeout_seconds, cancel)
+        await operation()
+        raise asyncio.TimeoutError("forced timeout")
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_args, **_kwargs: _conn_ctx(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_scope_fingerprint",
+            return_value=_TEST_SCOPE_FP,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.run_with_timeout",
+            side_effect=_timeout_after_fetch,
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(sql, tenant_id=1, page_size=20, page_token=token)
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "timeout"
+    metadata = result["metadata"]
+    assert metadata["pagination.session.page_size_requested"] == 20
+    assert metadata["pagination.session.page_size_effective"] == 10
+    assert metadata["pagination.session.page_size_adjusted"] is True
+    assert metadata["pagination.session.no_safe_page"] is False
 
 
 @pytest.mark.asyncio
