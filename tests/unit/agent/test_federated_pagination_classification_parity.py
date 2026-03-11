@@ -869,6 +869,12 @@ async def test_global_row_budget_classification_parity_between_mcp_ast_and_agent
         rows_by_call=[[{"id": 1000 + i} for i in range(31)]],
     )
     assert "error" not in page_two
+    assert page_two["metadata"]["pagination.session.page_size_adjusted"] is True
+    assert page_two["metadata"]["pagination.session.no_safe_page"] is False
+    assert page_two["metadata"].get("pagination.reject_reason_code") is None
+    agent_page_two = await _run_agent_with_tool_payload(page_two)
+    assert agent_page_two.get("error") is None
+    assert agent_page_two.get("error_category") is None
     cursor_two = page_two["metadata"]["next_keyset_cursor"]
     assert cursor_two
 
